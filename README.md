@@ -12,6 +12,7 @@ A small community tennis league needed a lightweight way to:
 2. **Let players sign up** without creating accounts or remembering passwords — just name and phone.
 3. **Generate random doubles pairings** on the day of play so the admin isn't doing it by hand on a whiteboard.
 4. **Keep a roster** so returning players can find their name in a dropdown instead of re-typing it every time.
+5. **Subscribe to a calendar feed** so sessions automatically appear in Google Calendar, Apple Calendar, or Outlook.
 
 Previously this was managed over group text message. The goal was to replace that with a simple, mobile-friendly web page anyone can open from their phone.
 
@@ -54,7 +55,8 @@ API Routes (Next.js route handlers)
   ├── DELETE /api/sessions/[id]/signups/[signupId]  remove signup (admin)
   ├── GET  /api/sessions/[id]/pairings    get pairings
   ├── POST /api/sessions/[id]/pairings    generate pairings (admin, Fisher-Yates shuffle)
-  └── GET  /api/players             player roster for autocomplete
+  ├── GET  /api/players             player roster for autocomplete
+  └── GET  /api/calendar            iCal feed for calendar subscription
 
 Database (PostgreSQL)
   ├── sessions   – one row per scheduled court booking
@@ -65,7 +67,7 @@ Database (PostgreSQL)
 
 **Pairing generation** uses a Fisher-Yates shuffle over the signup list, then groups into sets of four per court. Any remainder sits out. The entire operation (delete old pairings + insert new ones) runs in a single Prisma transaction so the court sheet is never in a half-replaced state.
 
-**Auth** works by storing a SHA-256 hash of the admin password in a cookie at login. Every admin API route and the admin server component calls `isAdmin()`, which re-hashes `ADMIN_PASSWORD` from the environment and compares — no session store, no database round-trip.
+**Auth** works by storing a SHA-256 hash of the admin password in a cookie at login. Every admin API route and the admin server component calls `isAdmin()`, which re-hashes `AUTH_SECRET` from the environment and compares — no session store, no database round-trip.
 
 ---
 
@@ -84,7 +86,7 @@ A proper role system would let the league coordinator delegate to an assistant a
 The signup and pairing pages fetch on mount and after mutations with plain `fetch`. Adding SWR or React Query would give optimistic updates and background revalidation, but the UX requirement is simple enough that a full-page re-fetch after each action is imperceptible on a local network.
 
 **AWS Amplify vs EC2 vs Vercel**
-Vercel is the obvious choice for Next.js but its free tier doesn't support private VPC networking, which is needed to connect to RDS without exposing the database to the public internet. EC2 solves that but requires managing the OS, Node process, and deploys manually. Amplify sits in between — git-connected CI/CD and managed environment variables like Vercel, but running inside AWS where it can reach RDS over a private connection. The tradeoff is a less mature Next.js runtime than Vercel and a slightly more involved initial setup.
+Vercel is the obvious choice for Next.js but its free tier doesn't support private VPC networking for RDS. EC2 solves that but requires managing the OS, Node process, and deploys manually. Amplify sits in between — git-connected CI/CD and managed environment variables like Vercel, but running inside AWS. In practice, Amplify's VPC support for SSR apps is limited and poorly documented; RDS ended up publicly accessible with SSL enforced at the driver level instead. The tradeoff is a less mature Next.js runtime than Vercel, quirks around SSR environment variable injection (worked around via `amplify.yml`), and a more involved initial setup.
 
 ---
 
@@ -120,13 +122,13 @@ Admin panel is at [http://localhost:3000/admin](http://localhost:3000/admin).
 
 | Variable | Description |
 |---|---|
-| `ADMIN_PASSWORD` | Password for the admin panel |
+| `AUTH_SECRET` | Password for the admin panel |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Maps Embed API key (optional — falls back to a plain Maps link) |
 
 Example `.env.local`:
 ```
-ADMIN_PASSWORD=tennis123
+AUTH_SECRET=tennis123
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/shit_league
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
 ```
@@ -137,21 +139,22 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
 
 ### Infrastructure
 - **AWS Amplify** — hosts the Next.js app, connected to the GitHub repo for automatic deploys on push to `main`
-- **AWS RDS** — PostgreSQL 17 in a private subnet, reachable from Amplify over a VPC connection
+- **AWS RDS** — PostgreSQL 17, publicly accessible, SSL enforced via `pg` driver adapter (`rejectUnauthorized: false`)
 
 ### Steps
 
-1. **RDS** — create a PostgreSQL 17 instance in a private subnet. Note the endpoint.
-2. **Amplify** — connect the GitHub repo in the Amplify console, select the `main` branch.
-3. **Environment variables** — in Amplify → App settings → Environment variables, add:
+1. **RDS** — create a PostgreSQL 17 instance with **Publicly accessible: Yes**. Note the endpoint.
+2. **Security group** — add an inbound rule: type `PostgreSQL`, port `5432`, source `0.0.0.0/0`.
+3. **Amplify** — connect the GitHub repo in the Amplify console, select the `main` branch.
+4. **Environment variables** — in Amplify → Hosting → Environment variables, add:
    ```
-   DATABASE_URL=postgresql://user:pass@your-rds-endpoint:5432/tennis
-   ADMIN_PASSWORD=a-strong-password
+   DATABASE_URL=postgresql://user:ENCODED_PASSWORD@your-rds-endpoint:5432/postgres
+   AUTH_SECRET=a-strong-password
    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
    ```
-4. **VPC** — in Amplify → App settings → VPC settings, attach the same VPC and private subnets as your RDS instance so Amplify can reach it privately.
-5. **Migrate** — after the first deploy, run migrations against the production DB:
+   URL-encode the password: special characters (e.g. `#` → `%23`) must be encoded or the connection string will fail to parse.
+5. **Migrate** — run migrations against the production DB before the first deploy:
    ```bash
    DATABASE_URL=<prod-url> npx prisma migrate deploy
    ```
-6. **Security group** — RDS inbound: allow port 5432 from the Amplify VPC security group only.
+6. **Deploy** — push to `main` or trigger a manual build in Amplify. The `amplify.yml` build spec writes env vars to `.env.production` so they are available to the SSR Lambda at runtime.
