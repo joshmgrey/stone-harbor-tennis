@@ -49,6 +49,12 @@ export default async function HomePage() {
           <p className="text-green-200 mt-1 text-sm">
             Sign up for a session and we&apos;ll handle the doubles pairings.
           </p>
+          <a
+            href="/api/calendar"
+            className="inline-block mt-3 text-xs bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg transition-colors"
+          >
+            📅 Subscribe to Calendar
+          </a>
         </div>
       </div>
 
