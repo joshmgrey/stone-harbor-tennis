@@ -54,10 +54,10 @@ export async function POST(
         data: {
           session_id: Number(id),
           court_number: i + 1,
-          team1_player1: players[i * 4].name,
-          team1_player2: players[i * 4 + 1].name,
-          team2_player1: players[i * 4 + 2].name,
-          team2_player2: players[i * 4 + 3].name,
+          team1_player1: players[i * 4].player.name,
+          team1_player2: players[i * 4 + 1].player.name,
+          team2_player1: players[i * 4 + 2].player.name,
+          team2_player2: players[i * 4 + 3].player.name,
         },
       })
     ),
