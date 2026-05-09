@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const pw = process.env.ADMIN_PASSWORD;
+  const pw = process.env.AUTH_SECRET;
   return NextResponse.json({
     set: pw !== undefined,
     length: pw?.length ?? 0,

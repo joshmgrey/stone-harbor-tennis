@@ -3,7 +3,7 @@ import { cookieName, adminToken } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   const { password } = await req.json();
-  if (password !== process.env.ADMIN_PASSWORD) {
+  if (password !== process.env.AUTH_SECRET) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
   const res = NextResponse.json({ ok: true });
