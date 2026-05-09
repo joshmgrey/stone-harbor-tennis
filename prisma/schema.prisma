@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Session {
+  id          Int       @id @default(autoincrement())
+  date        String
+  start_time  String
+  end_time    String
+  location    String    @default("Stone Harbor Tennis Courts")
+  courts      Int       @default(2)
+  max_players Int       @default(16)
+  notes       String?
+  created_at  DateTime  @default(now())
+  signups     Signup[]
+  pairings    Pairing[]
+
+  @@map("sessions")
+}
+
+model Signup {
+  id           Int      @id @default(autoincrement())
+  session_id   Int
+  name         String
+  phone        String?
+  signed_up_at DateTime @default(now())
+  session      Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@map("signups")
+}
+
+model Pairing {
+  id             Int      @id @default(autoincrement())
+  session_id     Int
+  court_number   Int
+  team1_player1  String
+  team1_player2  String
+  team2_player1  String
+  team2_player2  String
+  generated_at   DateTime @default(now())
+  session        Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@map("pairings")
+}
+
+model Player {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  phone      String?
+  created_at DateTime @default(now())
+
+  @@map("players")
+}
