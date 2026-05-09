@@ -58,9 +58,9 @@ API Routes (Next.js route handlers)
 
 Database (PostgreSQL)
   ├── sessions   – one row per scheduled court booking
-  ├── signups    – many-to-one with sessions (cascades on delete)
+  ├── signups    – many-to-one with sessions (cascades on delete); references players via player_id FK
   ├── pairings   – generated doubles assignments, replaced atomically each run
-  └── players    – persistent roster, upserted on every signup
+  └── players    – persistent roster, upserted on every signup; authoritative source for name and phone
 ```
 
 **Pairing generation** uses a Fisher-Yates shuffle over the signup list, then groups into sets of four per court. Any remainder sits out. The entire operation (delete old pairings + insert new ones) runs in a single Prisma transaction so the court sheet is never in a half-replaced state.
