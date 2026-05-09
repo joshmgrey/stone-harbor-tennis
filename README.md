@@ -101,7 +101,7 @@ Vercel is the obvious choice for Next.js but its free tier doesn't support priva
 npm install
 
 # 2. Create the database
-psql -U postgres -c "CREATE DATABASE shit_league;"
+psql -U postgres -c "CREATE DATABASE tennis;"
 
 # 3. Copy environment variables and fill in the values
 cp .env.local.example .env.local
@@ -127,7 +127,7 @@ Admin panel is at [http://localhost:3000/admin](http://localhost:3000/admin).
 Example `.env.local`:
 ```
 ADMIN_PASSWORD=tennis123
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/shit_league
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tennis
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
 ```
 
