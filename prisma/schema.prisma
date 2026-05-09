@@ -25,10 +25,10 @@ model Session {
 model Signup {
   id           Int      @id @default(autoincrement())
   session_id   Int
-  name         String
-  phone        String?
+  player_id    Int
   signed_up_at DateTime @default(now())
   session      Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  player       Player   @relation(fields: [player_id], references: [id])
 
   @@map("signups")
 }
@@ -52,6 +52,7 @@ model Player {
   name       String   @unique
   phone      String?
   created_at DateTime @default(now())
+  signups    Signup[]
 
   @@map("players")
 }

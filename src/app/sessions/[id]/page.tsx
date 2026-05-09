@@ -128,7 +128,7 @@ export default function SessionPage() {
   const pairedPlayers = new Set(
     pairings.flatMap((p) => [p.team1_player1, p.team1_player2, p.team2_player1, p.team2_player2])
   );
-  const sittingOut = signups.filter((s) => !pairedPlayers.has(s.name));
+  const sittingOut = signups.filter((s) => !pairedPlayers.has(s.player.name));
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -193,7 +193,7 @@ export default function SessionPage() {
             {sittingOut.length > 0 && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm">
                 <span className="font-semibold text-orange-700">Sitting out this round: </span>
-                <span className="text-orange-600">{sittingOut.map((s) => s.name).join(", ")}</span>
+                <span className="text-orange-600">{sittingOut.map((s) => s.player.name).join(", ")}</span>
               </div>
             )}
           </div>
@@ -279,9 +279,9 @@ export default function SessionPage() {
             {signups.map((s, i) => (
               <li key={s.id} className="flex items-center gap-3 py-2.5">
                 <span className="text-gray-400 text-sm w-5 text-right shrink-0">{i + 1}.</span>
-                <span className="font-medium text-gray-800">{s.name}</span>
-                {s.phone && (
-                  <span className="text-gray-400 text-xs ml-auto">{s.phone}</span>
+                <span className="font-medium text-gray-800">{s.player.name}</span>
+                {s.player.phone && (
+                  <span className="text-gray-400 text-xs ml-auto">{s.player.phone}</span>
                 )}
               </li>
             ))}

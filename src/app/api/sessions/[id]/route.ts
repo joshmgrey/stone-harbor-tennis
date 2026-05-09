@@ -20,6 +20,7 @@ export async function GET(
   const signups = await prisma.signup.findMany({
     where: { session_id: Number(id) },
     orderBy: { signed_up_at: "asc" },
+    include: { player: true },
   });
 
   const { _count, ...rest } = session;

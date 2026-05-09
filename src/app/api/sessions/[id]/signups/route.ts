@@ -29,14 +29,15 @@ export async function POST(
   const trimmedPhone = phone?.trim() || null;
 
   // Upsert player — add if new, update phone if a better one is now provided
-  await prisma.player.upsert({
+  const player = await prisma.player.upsert({
     where: { name: trimmedName },
     create: { name: trimmedName, phone: trimmedPhone },
     update: { phone: trimmedPhone ?? undefined },
   });
 
   const signup = await prisma.signup.create({
-    data: { session_id: Number(id), name: trimmedName, phone: trimmedPhone },
+    data: { session_id: Number(id), player_id: player.id },
+    include: { player: true },
   });
 
   return NextResponse.json(signup, { status: 201 });
