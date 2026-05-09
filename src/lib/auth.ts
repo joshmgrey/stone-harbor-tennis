@@ -10,7 +10,7 @@ function tokenFor(password: string): string {
 export async function isAdmin(): Promise<boolean> {
   const store = await cookies();
   const cookie = store.get(COOKIE_NAME);
-  const expected = tokenFor(process.env.ADMIN_PASSWORD ?? "");
+  const expected = tokenFor(process.env.AUTH_SECRET ?? "");
   return cookie?.value === expected;
 }
 
@@ -19,5 +19,5 @@ export function cookieName(): string {
 }
 
 export function adminToken(): string {
-  return tokenFor(process.env.ADMIN_PASSWORD ?? "");
+  return tokenFor(process.env.AUTH_SECRET ?? "");
 }
