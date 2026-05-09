@@ -8,7 +8,10 @@ export async function GET() {
     include: { _count: { select: { signups: true } } },
   });
   return NextResponse.json(
-    sessions.map(({ _count, ...s }) => ({ ...s, signup_count: _count.signups }))
+    sessions.map((s) => {
+      const { _count, ...rest } = s;
+      return { ...rest, signup_count: _count.signups };
+    })
   );
 }
 
