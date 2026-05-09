@@ -26,6 +26,7 @@ export async function POST(
   const signups = await prisma.signup.findMany({
     where: { session_id: Number(id) },
     orderBy: { signed_up_at: "asc" },
+    include: { player: true },
   });
 
   if (signups.length < 4) {
@@ -43,7 +44,7 @@ export async function POST(
   }
 
   const courts = Math.floor(players.length / 4);
-  const sittingOut = players.slice(courts * 4).map((p) => p.name);
+  const sittingOut = players.slice(courts * 4).map((p) => p.player.name);
 
   // Replace old pairings atomically
   const [, ...pairings] = await prisma.$transaction([

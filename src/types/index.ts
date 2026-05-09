@@ -14,8 +14,8 @@ export interface Session {
 export interface Signup {
   id: number;
   session_id: number;
-  name: string;
-  phone: string | null;
+  player_id: number;
+  player: Player;
   signed_up_at: string;
 }
 

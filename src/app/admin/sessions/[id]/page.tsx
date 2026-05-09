@@ -107,7 +107,7 @@ export default function AdminSessionPage() {
   const computedSittingOut =
     sittingOut.length > 0
       ? sittingOut
-      : signups.filter((s) => !pairedNames.has(s.name)).map((s) => s.name);
+      : signups.filter((s) => !pairedNames.has(s.player.name)).map((s) => s.player.name);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -220,9 +220,9 @@ export default function AdminSessionPage() {
               <li key={s.id} className="flex items-center gap-3 py-3">
                 <span className="text-gray-400 text-sm w-6 text-right shrink-0">{i + 1}.</span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900">{s.name}</div>
-                  {s.phone && (
-                    <div className="text-gray-400 text-xs">{s.phone}</div>
+                  <div className="font-medium text-gray-900">{s.player.name}</div>
+                  {s.player.phone && (
+                    <div className="text-gray-400 text-xs">{s.player.phone}</div>
                   )}
                 </div>
                 <div className="text-gray-400 text-xs shrink-0">
