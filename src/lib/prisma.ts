@@ -26,6 +26,7 @@ function createPrisma() {
     process.env.DATABASE_URL ??
     "postgresql://postgres:postgres@localhost:5432/shit_league";
   const { user, password, host, port, database } = parseDbUrl(dsn);
+  console.log("[prisma] connecting to", host, port, database, "user:", user);
   const pool = new Pool({
     user,
     password,
