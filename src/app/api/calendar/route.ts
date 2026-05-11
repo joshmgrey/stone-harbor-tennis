@@ -26,7 +26,7 @@ export async function GET() {
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Stone Harbor Tennis//SHIT League//EN",
+    "PRODID:-//Stone Harbor Tennis//League Calendar//EN",
     "X-WR-CALNAME:Stone Harbor Invitational Tennis",
     "X-WR-TIMEZONE:America/New_York",
     "CALSCALE:GREGORIAN",
@@ -46,7 +46,7 @@ export async function GET() {
       fold(`UID:session-${s.id}@stone-harbor-invitational-tennis.org`),
       fold(`DTSTART;TZID=America/New_York:${icalDate(s.date, s.start_time)}`),
       fold(`DTEND;TZID=America/New_York:${icalDate(s.date, s.end_time)}`),
-      fold(`SUMMARY:SHIT League Tennis`),
+      fold(`SUMMARY:Stone Harbor Tennis`),
       fold(`LOCATION:${s.location}`),
       fold(`DESCRIPTION:${description}`),
       "END:VEVENT"
@@ -58,7 +58,7 @@ export async function GET() {
   return new NextResponse(lines.join("\r\n"), {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="shit-league.ics"',
+      "Content-Disposition": 'attachment; filename="stone-harbor-tennis.ics"',
     },
   });
 }

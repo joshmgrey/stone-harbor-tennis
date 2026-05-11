@@ -35,7 +35,7 @@ export default function AdminLogin() {
         <div className="text-center mb-6">
           <div className="text-4xl mb-2">🔐</div>
           <h1 className="text-xl font-bold text-gray-900">Admin Login</h1>
-          <p className="text-gray-500 text-sm mt-1">SHIT League organizer access</p>
+          <p className="text-gray-500 text-sm mt-1">Stone Harbor Tennis organizer access</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

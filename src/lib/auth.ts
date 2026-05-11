@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { createHash } from "crypto";
 
-const COOKIE_NAME = "shit_league_auth";
+const COOKIE_NAME = "stone_harbor_tennis_auth";
 
 function tokenFor(password: string): string {
-  return createHash("sha256").update("shit_league:" + password).digest("hex");
+  return createHash("sha256").update("stone_harbor_tennis:" + password).digest("hex");
 }
 
 export async function isAdmin(): Promise<boolean> {

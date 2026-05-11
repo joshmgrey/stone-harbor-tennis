@@ -1,4 +1,4 @@
-# Stone Harbor Invitational Tennis (SHIT League)
+# Stone Harbor Invitational Tennis
 
 A scheduling and signup site for a recreational doubles tennis league in Stone Harbor, NJ.
 

@@ -6,8 +6,7 @@ const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 function createPrisma() {
   const connectionString =
     process.env.DATABASE_URL ??
-    "postgresql://postgres:postgres@localhost:5432/shit_league";
-  console.log("[prisma] init, NODE_ENV:", process.env.NODE_ENV, "url starts:", connectionString.slice(0, 30));
+    "postgresql://postgres:postgres@localhost:5432/stone_harbor_tennis";
   const adapter = new PrismaPg({
     connectionString,
     ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,

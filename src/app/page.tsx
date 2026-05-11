@@ -44,7 +44,7 @@ export default async function HomePage() {
         <div>
           <h1 className="text-3xl font-black tracking-tight">Stone Harbor Invitational Tennis</h1>
           <p className="text-green-100 mt-2 text-lg">
-            Welcome to the SHIT League &mdash; Stone Harbor, NJ
+            Welcome to Stone Harbor Tennis &mdash; Stone Harbor, NJ
           </p>
           <p className="text-green-200 mt-1 text-sm">
             Sign up for a session and we&apos;ll handle the doubles pairings.
