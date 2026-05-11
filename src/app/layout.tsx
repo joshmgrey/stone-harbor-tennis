@@ -3,7 +3,7 @@ import "./globals.css";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Stone Harbor Invitational Tennis – SHIT League",
+  title: "Stone Harbor Invitational Tennis",
   description: "Stone Harbor Invitational Tennis – schedule, sign-ups, and pairings",
 };
 
@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div>
                 <div className="text-2xl font-black tracking-tight leading-none">Stone Harbor Invitational Tennis</div>
                 <div className="text-green-200 text-xs tracking-widest uppercase font-medium">
-                  The SHIT League
+                  Stone Harbor Tennis
                 </div>
               </div>
             </Link>
@@ -42,7 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">{children}</main>
 
         <footer className="bg-green-900 text-green-300 text-center text-xs py-4 mt-auto">
-          Stone Harbor, NJ &nbsp;·&nbsp; SHIT League &nbsp;·&nbsp; Stone Harbor Invitational Tennis
+          Stone Harbor, NJ &nbsp;·&nbsp; Stone Harbor Invitational Tennis
         </footer>
       </body>
     </html>
