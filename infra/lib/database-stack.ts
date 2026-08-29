@@ -58,9 +58,29 @@ export interface DatabaseStackProps extends cdk.StackProps {
   readonly dbSecurityGroupId: string;
 
   /**
+   * The live instance's `MasterUsername`. CREATE-ONLY on the CloudFormation
+   * resource — a mismatch here makes a later deploy want to REPLACE the
+   * instance. Read it from `describe-db-instances`, do not assume "postgres".
+   */
+  readonly masterUsername: string;
+
+  /**
+   * The live instance's `DBName` (the initial database set at creation), or
+   * omit if none was set.
+   *
+   * CREATE-ONLY, and this is the trap: the app's connection string ending in
+   * `/postgres` does NOT mean `DBName` is "postgres" — `postgres` is the
+   * built-in database that always exists. A console instance created without
+   * an explicit "Initial database name" has `DBName` = null. If
+   * `describe-db-instances` shows `DBName: null`, leave this UNSET; setting it
+   * to "postgres" would make a later deploy replace the instance.
+   */
+  readonly databaseName?: string;
+
+  /**
    * ARN of a Secrets Manager secret you create BEFORE importing, containing
-   * the instance's CURRENT master username + password as
-   * `{ "username": "...", "password": "..." }`. See bottom comment for how.
+   * the instance's CURRENT password as `{ "password": "..." }` (a `username`
+   * key is fine too but unused). See bottom comment for how.
    */
   readonly masterCredentialsSecretArn: string;
 }
@@ -125,9 +145,20 @@ export class DatabaseStack extends cdk.Stack {
     // is a write-only property: CloudFormation import ignores it, and a
     // later deploy only touches it if the rendered value *changes*.
     //
-    // To avoid a surprise password reset, we bind to a secret that already
-    // holds the CURRENT credentials, created by you before import. After the
-    // import lands you can rotate deliberately.
+    // We import the secret purely so the stack can expose it (below) and an
+    // app stack can grant read on it. We deliberately DO NOT pass it to
+    // `Credentials.fromSecret()` — that helper always emits an
+    // `AWS::SecretsManager::SecretTargetAttachment`, and that resource type
+    // is NOT importable. `cdk import` builds one IMPORT change set from the
+    // whole synthesized template, so a non-importable new resource makes the
+    // import fail before the instance is ever adopted. Instead we feed the
+    // password straight in as a dynamic reference via `fromPassword` — the
+    // rendered template then contains exactly one resource, the importable
+    // `AWS::RDS::DBInstance`.
+    //
+    // (Post-import hardening step: switch to `Credentials.fromSecret()` or add
+    //  an explicit `SecretTargetAttachment` via `cdk deploy` so the secret
+    //  also carries host/port/dbname for the app stack to consume.)
     //
     // DIVERGENCE: today there is NO secret — the password lives only in the
     // Amplify env var. This introduces Secrets Manager as the source of truth.
@@ -169,18 +200,20 @@ export class DatabaseStack extends cdk.Stack {
       // enforced app-side via the `pg` adapter (`src/lib/prisma.ts`).
       publiclyAccessible: true,
 
-      credentials: rds.Credentials.fromSecret(
-        credentialsSecret,
-        // username must match what the secret's "username" key holds AND the
-        // live master username (README connection string uses the db name
-        // "postgres"; the master user is commonly "postgres" too — verify).
-        "postgres",
+      // `MasterUsername` (create-only) comes from context; the password is a
+      // `{{resolve:secretsmanager:...}}` dynamic reference — never rendered
+      // in plaintext, and ignored by `cdk import` as a write-only property.
+      credentials: rds.Credentials.fromPassword(
+        props.masterUsername,
+        cdk.SecretValue.secretsManager(props.masterCredentialsSecretArn, {
+          jsonField: "password",
+        }),
       ),
 
-      // The default database. README's connection string ends in `/postgres`,
-      // i.e. the app uses the built-in `postgres` database rather than a
-      // dedicated one. Matching that here; consider a dedicated DB in Path B.
-      databaseName: "postgres",
+      // `DBName` is CREATE-ONLY. Only set it if the live instance actually has
+      // one (see the prop doc). When `db:databaseName` is unset we omit the
+      // property entirely so CloudFormation keeps whatever the live value is.
+      ...(props.databaseName ? { databaseName: props.databaseName } : {}),
 
       allocatedStorage: props.allocatedStorageGib,
       // Storage autoscaling ceiling. If the live instance has "Enable storage
@@ -266,35 +299,40 @@ export class DatabaseStack extends cdk.Stack {
  *        vpc:DBSubnetGroup.VpcId,
  *        sgs:VpcSecurityGroups[].VpcSecurityGroupId,
  *        masterUser:MasterUsername,
+ *        dbName:DBName,
  *        instanceClass:DBInstanceClass
  *     }'
  *
- * Create the credentials secret from the values you already have:
+ *   -> masterUser  goes to  db:masterUsername
+ *   -> dbName      goes to  db:databaseName  ONLY if non-null; if it prints
+ *                  `null` / is absent, leave db:databaseName unset.
+ *
+ * Create the credentials secret from the password you already have:
  *
  *   aws secretsmanager create-secret \
  *     --name stone-harbor-tennis/rds/master \
- *     --secret-string '{"username":"postgres","password":"<CURRENT PASSWORD>"}'
+ *     --secret-string '{"password":"<CURRENT PASSWORD>"}'
  *
  * ---------------------------------------------------------------------------
  * IMPORT SEQUENCE
  * ---------------------------------------------------------------------------
  *   1. cdk bootstrap                      (once per account/region)
  *   2. cdk synth DatabaseStack            (must synth with concrete env)
- *   3. cdk import DatabaseStack           (feed it the DBInstanceIdentifier;
- *                                          only the AWS::RDS::DBInstance is
- *                                          imported)
- *   4. cdk diff DatabaseStack             Acceptable diff is EXACTLY ONE
- *                                         added resource:
- *                                         AWS::SecretsManager::SecretTargetAttachment
- *                                         (it writes host/port/dbname back
- *                                         into your secret — additive, safe).
- *                                         ZERO changes on AWS::RDS::DBInstance.
- *                                         Any instance-level change => a prop
- *                                         is wrong; fix it, do NOT deploy.
- *   5. cdk deploy DatabaseStack           creates the attachment.
- *   6. commit cdk.context.json
+ *   3. cdk import DatabaseStack           feed it the DBInstanceIdentifier.
+ *                                        The template has ONE resource
+ *                                        (AWS::RDS::DBInstance), which is
+ *                                        importable, so this succeeds.
+ *   4. cdk diff DatabaseStack             MUST be empty — no added/removed
+ *                                        resources, no property changes. Any
+ *                                        diff means a context value is wrong;
+ *                                        fix it, do NOT deploy. (A diff on a
+ *                                        create-only prop — DBName,
+ *                                        MasterUsername, engine, storage
+ *                                        encryption — means a deploy would
+ *                                        REPLACE the instance.)
+ *   5. commit cdk.context.json
  *
- * Only once step 4 looks right do you start changing things
- * (deletionProtection, then Path B).
+ * Only once step 4 is clean do you start changing things (turn on
+ * deletionProtection, wire the SecretTargetAttachment, then Path B).
  * ---------------------------------------------------------------------------
  */

@@ -14,7 +14,7 @@ const app = new cdk.App();
  *     --query 'DBInstances[0].{engine:EngineVersion,storage:AllocatedStorage,
  *       subnetGroup:DBSubnetGroup.DBSubnetGroupName,vpc:DBSubnetGroup.VpcId,
  *       sgs:VpcSecurityGroups[].VpcSecurityGroupId,masterUser:MasterUsername,
- *       class:DBInstanceClass,encrypted:StorageEncrypted}'
+ *       dbName:DBName,class:DBInstanceClass,encrypted:StorageEncrypted}'
  */
 function req(key: string): string {
   const value = app.node.tryGetContext(key);
@@ -25,6 +25,12 @@ function req(key: string): string {
     );
   }
   return value;
+}
+
+/** Optional context — returns undefined if unset or empty. */
+function opt(key: string): string | undefined {
+  const value = app.node.tryGetContext(key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 // The CDK CLI populates these from your active AWS credentials/profile.
@@ -55,7 +61,12 @@ new DatabaseStack(app, "DatabaseStack", {
   vpcId: req("db:vpcId"),
   dbSubnetGroupName: req("db:subnetGroupName"),
   dbSecurityGroupId: req("db:securityGroupId"),
+  masterUsername: req("db:masterUsername"),
   masterCredentialsSecretArn: req("db:masterSecretArn"),
+
+  // Optional: set ONLY if `describe-db-instances` shows a non-null DBName.
+  // Create-only — a wrong value here replaces the instance on deploy.
+  databaseName: opt("db:databaseName"),
 
   tags: {
     project: "stone-harbor-tennis",
