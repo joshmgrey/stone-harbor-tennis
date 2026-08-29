@@ -1,0 +1,11 @@
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+# CDK stores resolved lookup results here — this file SHOULD be committed
+# (see note in README), so it is deliberately NOT ignored.
