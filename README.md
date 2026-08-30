@@ -27,9 +27,9 @@ Previously this was managed over group text message. The goal was to replace tha
 | **Styling** | Tailwind CSS v4 | Utility-first keeps the CSS co-located with the markup, which matters in a project this small where a separate stylesheet would just be noise. |
 | **ORM** | Prisma 7 | Type-safe queries with zero boilerplate SQL, auto-generated migrations, and a single schema file that doubles as documentation. |
 | **Database (dev)** | PostgreSQL 17 (local) | Matches production exactly, so there are no "works on my machine" surprises with type casting, `ILIKE`, or `SERIAL` vs `AUTOINCREMENT`. |
-| **Database (prod)** | AWS RDS PostgreSQL | Managed backups, automatic minor-version patching, and Multi-AZ failover if needed — more reliable than self-managing Postgres on EC2. |
+| **Database (prod)** | AWS RDS PostgreSQL | Managed backups and automatic minor-version patching. Not publicly accessible — reachable only from the Fargate service's security group inside the VPC. |
 | **Auth** | Cookie + SHA-256 hash | The only privileged user is a single admin. A full auth library (NextAuth, Clerk) would be heavy for one person with one password. |
-| **Hosting** | AWS Amplify | Git-connected deployments (push to main → live), built-in CI/CD, and managed environment variables — no server to maintain. |
+| **Hosting** | AWS ECS Fargate + ALB | Runs the container in the same VPC as the database, so RDS can be private. CDK-defined ([`infra/`](infra/)); GitHub Actions builds the image and deploys on push to `main`. |
 
 ---
 
@@ -85,8 +85,8 @@ A proper role system would let the league coordinator delegate to an assistant a
 **No client-side caching / SWR**
 The signup and pairing pages fetch on mount and after mutations with plain `fetch`. Adding SWR or React Query would give optimistic updates and background revalidation, but the UX requirement is simple enough that a full-page re-fetch after each action is imperceptible on a local network.
 
-**AWS Amplify vs EC2 vs Vercel**
-Vercel is the obvious choice for Next.js but its free tier doesn't support private VPC networking for RDS. EC2 solves that but requires managing the OS, Node process, and deploys manually. Amplify sits in between — git-connected CI/CD and managed environment variables like Vercel, but running inside AWS. In practice, Amplify's VPC support for SSR apps is limited and poorly documented; RDS ended up publicly accessible with SSL enforced at the driver level instead. The tradeoff is a less mature Next.js runtime than Vercel, quirks around SSR environment variable injection (worked around via `amplify.yml`), and a more involved initial setup.
+**Hosting: Fargate (was Amplify)**
+The app first ran on AWS Amplify with a publicly-accessible RDS instance — Amplify's VPC support for SSR apps was too limited to reach a private database. It was later migrated to a container on ECS Fargate behind an ALB, in the same VPC as RDS, so the database could be closed off (`infra/README.md` has the phased story). App Runner would have been simpler but AWS closed it to new customers. Vercel stays off the table — no private VPC networking for RDS on the plans that matter. The cost is roughly $15/mo → $40/mo and a real deploy pipeline instead of git-push-and-forget.
 
 ---
 
@@ -137,24 +137,34 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
 
 ## Deployment (AWS)
 
-### Infrastructure
-- **AWS Amplify** — hosts the Next.js app, connected to the GitHub repo for automatic deploys on push to `main`
-- **AWS RDS** — PostgreSQL 17, publicly accessible, SSL enforced via `pg` driver adapter (`rejectUnauthorized: false`)
+All infrastructure is AWS CDK in [`infra/`](infra/) — see [`infra/README.md`](infra/README.md)
+for the full picture and how it got here (it started on Amplify + a public RDS
+instance and was migrated).
 
-### Steps
+### Shape
 
-1. **RDS** — create a PostgreSQL 17 instance with **Publicly accessible: Yes**. Note the endpoint.
-2. **Security group** — add an inbound rule: type `PostgreSQL`, port `5432`, source `0.0.0.0/0`.
-3. **Amplify** — connect the GitHub repo in the Amplify console, select the `main` branch.
-4. **Environment variables** — in Amplify → Hosting → Environment variables, add:
-   ```
-   DATABASE_URL=postgresql://user:ENCODED_PASSWORD@your-rds-endpoint:5432/postgres
-   AUTH_SECRET=a-strong-password
-   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
-   ```
-   URL-encode the password: special characters (e.g. `#` → `%23`) must be encoded or the connection string will fail to parse.
-5. **Migrate** — run migrations against the production DB before the first deploy:
-   ```bash
-   DATABASE_URL=<prod-url> npx prisma migrate deploy
-   ```
-6. **Deploy** — push to `main` or trigger a manual build in Amplify. The `amplify.yml` build spec writes env vars to `.env.production` so they are available to the SSR Lambda at runtime.
+```
+Route 53 (apex, www, new.) ─▶ ALB (HTTPS, ACM) ─▶ Fargate service ─▶ RDS PostgreSQL 17
+                                                   (default VPC)      (private, SG-scoped)
+```
+
+- **`DatabaseStack`** — the RDS instance (adopted via `cdk import`), `publiclyAccessible: false`, security group admits `5432` only from the Fargate service. Deployed from a laptop.
+- **`AppStack`** — ECR image, ECS Fargate service behind an ALB, ACM cert, Route 53 records, and a one-off migrator task. Deployed by CI.
+- **`GitHubDeployStack`** — GitHub OIDC provider + the role CI assumes (no stored AWS keys).
+
+### Runtime config
+
+Secrets Manager, injected into the container by ECS (never in the task definition):
+
+| Secret | |
+|---|---|
+| `stone-harbor-tennis/app/database-url` | full `postgresql://…` connection string |
+| `stone-harbor-tennis/app/auth-secret` | the admin password (`AUTH_SECRET`) |
+
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is a **build arg** (inlined into the client bundle at image build time), supplied from the `GOOGLE_MAPS_API_KEY` GitHub Actions secret.
+
+### Deploying
+
+- **App**: push to `main` → `.github/workflows/deploy.yml` builds the image and runs `cdk deploy AppStack`.
+- **Migrations**: **Actions → migrate → Run workflow** — runs `prisma migrate deploy` as a one-off Fargate task in the VPC (the DB isn't reachable from outside it).
+- **Database changes**: `cd infra && npx cdk deploy DatabaseStack` from a machine with AWS credentials.
