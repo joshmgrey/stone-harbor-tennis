@@ -219,11 +219,31 @@ target from the output above.
 
 ## B4 — database private
 
-`database-stack.ts`: `publiclyAccessible: false`, and a CDK-managed SG that
-admits 5432 only from `db:appSecurityGroupId` (the `ServiceSecurityGroupId`
-output of `AppStack`). `cdk deploy DatabaseStack` from your laptop — an
-in-place modify, ~30 s connection blip. After this the migration step in
-`deploy.yml` has to move to an in-VPC ECS task.
+Order after merging:
+
+1. **`cdk deploy GitHubDeployStack`** (laptop) — the role gains `ecs:RunTask`
+   / `iam:PassRole` for the migrator task. Approve the IAM prompt.
+2. `deploy.yml` runs on the merge → `AppStack` gains the **migrator task
+   definition** and its outputs. (No migrate step in `deploy.yml` any more.)
+3. **`cdk deploy DatabaseStack`** (laptop) — `publiclyAccessible: false` +
+   a CDK-managed SG admitting 5432 only from `db:appSecurityGroupId`
+   (`sg-0827a63415fdba069`, the `ServiceSecurityGroupId` output). Approve the
+   security prompt. This is an **online modify** — a few seconds' connection
+   reset, no replacement. Prisma reconnects.
+4. Verify the site still loads. The RDS DNS name now resolves to the private
+   IP (from in-VPC); the app reaches it through the SG.
+
+`db:securityGroupId` (the old `0.0.0.0/0` SG, `sg-00ad52e709e351b65`) is no
+longer used — B5 deletes it.
+
+### Migrations, from here on
+
+`.github/workflows/migrate.yml` (**Actions → migrate → Run workflow**) runs
+`prisma migrate deploy` as a one-off Fargate task in the VPC. Run it by hand
+when a merged change ships a new migration — after `deploy.yml` for that
+commit, before the schema change matters. Your laptop can no longer reach the
+DB directly; for `psql` / `prisma studio` you'd tunnel through a bastion
+(not set up — add if you need it).
 
 ## B5 — decommission
 

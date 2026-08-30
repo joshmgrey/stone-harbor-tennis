@@ -93,9 +93,8 @@ export class GitHubDeployStack extends cdk.Stack {
       }),
     );
 
-    // The deploy workflow runs `prisma migrate deploy` directly (the DB is
-    // still public in B2/B3) and reads DATABASE_URL from Secrets Manager to
-    // do it. Scoped to this project's secrets.
+    // migrate.yml reads DATABASE_URL from Secrets Manager (B0–B3) and, once
+    // the DB is private (B4), runs the migrator as an in-VPC Fargate task.
     this.deployRole.addToPolicy(
       new iam.PolicyStatement({
         sid: "ReadProjectSecrets",
@@ -103,6 +102,36 @@ export class GitHubDeployStack extends cdk.Stack {
         resources: [
           `arn:aws:secretsmanager:*:${this.account}:secret:stone-harbor-tennis/*`,
         ],
+      }),
+    );
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "RunMigratorTask",
+        actions: [
+          "ecs:RunTask",
+          "ecs:DescribeTasks",
+          "cloudformation:DescribeStacks",
+          "cloudformation:DescribeStackResources",
+          "logs:FilterLogEvents",
+          "logs:GetLogEvents",
+          "logs:DescribeLogStreams",
+        ],
+        resources: ["*"],
+        conditions: {
+          // RunTask/DescribeTasks can't be resource-scoped usefully without
+          // pinning the task-def revision; keep it to this region.
+          StringEquals: { "aws:RequestedRegion": "us-east-2" },
+        },
+      }),
+    );
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "PassEcsTaskRoles",
+        actions: ["iam:PassRole"],
+        resources: [`arn:aws:iam::${this.account}:role/AppStack-*`],
+        conditions: {
+          StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" },
+        },
       }),
     );
 

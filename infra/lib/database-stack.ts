@@ -51,12 +51,12 @@ export interface DatabaseStackProps extends cdk.StackProps {
   readonly dbSubnetGroupName: string;
 
   /**
-   * Id of the security group that currently fronts the instance — the one
-   * with the `0.0.0.0/0 : 5432` inbound rule from README step 2. We reference
-   * it, we do NOT recreate it, so the open rule stays exactly as-is and
-   * unmanaged until you decide to tighten it.
+   * B4 — the Fargate service's security group (`AppStack` output
+   * `ServiceSecurityGroupId`). The instance's new, CDK-managed SG admits
+   * 5432 only from this one; the old `0.0.0.0/0` SG is left orphaned for B5
+   * to delete.
    */
-  readonly dbSecurityGroupId: string;
+  readonly appSecurityGroupId: string;
 
   /**
    * The live instance's `MasterUsername`. CREATE-ONLY on the CloudFormation
@@ -126,17 +126,22 @@ export class DatabaseStack extends cdk.Stack {
     const vpc = ec2.Vpc.fromLookup(this, "DbVpc", { vpcId: props.vpcId });
 
     // ---------------------------------------------------------------------
-    // 2. Security group (referenced, not created)
+    // 2. Security group  (B4 — CDK-managed, replaces the imported 0.0.0.0/0 one)
     // ---------------------------------------------------------------------
-    // The instance's `VpcSecurityGroups` must match the live value for the
-    // import to be a no-op, so we point at the existing SG by id. Its
-    // inbound `0.0.0.0/0 : 5432` rule is left untouched and outside CDK's
-    // control. `mutable: false` stops CDK from trying to add rules to it.
-    const dbSecurityGroup = ec2.SecurityGroup.fromSecurityGroupId(
-      this,
-      "DbSecurityGroup",
-      props.dbSecurityGroupId,
-      { mutable: false },
+    // For the import this referenced the existing `sg-...` (open to the
+    // world). B4 swaps the instance onto a new SG that admits 5432 only from
+    // the Fargate service. Changing an RDS instance's SG membership is an
+    // online modify, not a replacement. The old SG ends up attached to
+    // nothing — B5 deletes it.
+    const dbSecurityGroup = new ec2.SecurityGroup(this, "DbSecurityGroup", {
+      vpc,
+      description: "stone-harbor-tennis RDS — 5432 from the Fargate service only",
+      allowAllOutbound: true,
+    });
+    dbSecurityGroup.addIngressRule(
+      ec2.Peer.securityGroupId(props.appSecurityGroupId),
+      ec2.Port.tcp(5432),
+      "Postgres from the Fargate app service",
     );
 
     // ---------------------------------------------------------------------
@@ -203,10 +208,12 @@ export class DatabaseStack extends cdk.Stack {
       subnetGroup,
       securityGroups: [dbSecurityGroup],
 
-      // The whole point of Path A: stay reachable from the public internet
-      // (Amplify SSR has no VPC route to a private instance). SSL is still
+      // B4 — the instance loses its public IP. The Fargate tasks reach it by
+      // its private address inside the default VPC; the RDS DNS name still
+      // resolves (to the private IP) from in-VPC. Applied as an online
+      // modify — a brief connection reset, no replacement. SSL is still
       // enforced app-side via the `pg` adapter (`src/lib/prisma.ts`).
-      publiclyAccessible: true,
+      publiclyAccessible: false,
 
       // `MasterUsername` (create-only) comes from context. `fromSecret` also
       // creates the SecretTargetAttachment linking this secret to the

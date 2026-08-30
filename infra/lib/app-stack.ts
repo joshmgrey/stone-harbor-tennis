@@ -156,8 +156,32 @@ export class AppStack extends cdk.Stack {
       "20",
     );
 
-    this.serviceSecurityGroupId =
-      service.service.connections.securityGroups[0].securityGroupId;
+    const serviceSg = service.service.connections.securityGroups[0];
+    this.serviceSecurityGroupId = serviceSg.securityGroupId;
+
+    // -------------------------------------------------------------------
+    // Migrator task — `prisma migrate deploy` as a one-off Fargate task.
+    // -------------------------------------------------------------------
+    // Once the DB is private (B4), CI can't reach it, so migrations run
+    // in-VPC. Uses the `migrator` image (full toolchain) and the service's
+    // own SG, so it's allowed through the RDS security group. Run it from
+    // `.github/workflows/migrate.yml` (manual) — schema changes are rare and
+    // deliberate, and don't belong in every routine deploy.
+    const migratorTask = new ecs.FargateTaskDefinition(this, "MigratorTask", {
+      cpu: 256,
+      memoryLimitMiB: 512,
+    });
+    migratorTask.addContainer("migrate", {
+      image: ecs.ContainerImage.fromAsset(path.join(__dirname, "..", ".."), {
+        file: "Dockerfile",
+        target: "migrator",
+        platform: ecrAssets.Platform.LINUX_AMD64,
+      }),
+      command: ["npx", "prisma", "migrate", "deploy"],
+      environment: { NODE_ENV: "production" },
+      secrets: { DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrl) },
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "migrate", logGroup }),
+    });
 
     // B3 — the cutover. Point the apex and www at the ALB.
     //
@@ -195,6 +219,15 @@ export class AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ServiceSecurityGroupId", {
       value: this.serviceSecurityGroupId,
       description: "put in db:appSecurityGroupId context for B4",
+    });
+
+    // Consumed by .github/workflows/migrate.yml via `describe-stacks`.
+    new cdk.CfnOutput(this, "ClusterName", { value: cluster.clusterName });
+    new cdk.CfnOutput(this, "MigratorTaskDefinitionArn", {
+      value: migratorTask.taskDefinitionArn,
+    });
+    new cdk.CfnOutput(this, "TaskSubnetIds", {
+      value: vpc.publicSubnets.map((s) => s.subnetId).join(","),
     });
   }
 }
