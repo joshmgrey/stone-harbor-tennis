@@ -7,21 +7,23 @@ const app = new cdk.App();
 /**
  * Every DatabaseStack prop must byte-for-byte match the live instance for
  * `cdk import` to be a no-op, so nothing here has a default. Values come from
- * cdk.json `context` (or `-c key=value` on the CLI). Read them off the live
- * instance first:
+ * `cdk.context.json` (gitignored — this repo is public) or `-c key=value` on
+ * the CLI. Read them off the live instance first:
  *
  *   aws rds describe-db-instances --db-instance-identifier <ID> \
  *     --query 'DBInstances[0].{engine:EngineVersion,storage:AllocatedStorage,
+ *       maxStorage:MaxAllocatedStorage,storageType:StorageType,
  *       subnetGroup:DBSubnetGroup.DBSubnetGroupName,vpc:DBSubnetGroup.VpcId,
  *       sgs:VpcSecurityGroups[].VpcSecurityGroupId,masterUser:MasterUsername,
- *       dbName:DBName,class:DBInstanceClass,encrypted:StorageEncrypted}'
+ *       dbName:DBName,class:DBInstanceClass,encrypted:StorageEncrypted,
+ *       kmsKey:KmsKeyId,multiAz:MultiAZ}'
  */
 function req(key: string): string {
   const value = app.node.tryGetContext(key);
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(
-      `Missing required context "${key}". Set it in infra/cdk.json under ` +
-        `"context", or pass -c ${key}=<value> on the command line.`,
+      `Missing required context "${key}". Add it to infra/cdk.context.json ` +
+        `(gitignored), or pass -c ${key}=<value> on the command line.`,
     );
   }
   return value;
@@ -67,6 +69,11 @@ new DatabaseStack(app, "DatabaseStack", {
   // Optional: set ONLY if `describe-db-instances` shows a non-null DBName.
   // Create-only — a wrong value here replaces the instance on deploy.
   databaseName: opt("db:databaseName"),
+
+  // Optional: the KMS key ARN the encrypted instance uses. Omit to let
+  // CloudFormation resolve the default aws/rds key; set it if `cdk diff`
+  // after import shows a KmsKeyId change.
+  kmsKeyArn: opt("db:kmsKeyArn"),
 
   tags: {
     project: "stone-harbor-tennis",

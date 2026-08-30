@@ -7,5 +7,9 @@ node_modules
 .cdk.staging
 cdk.out
 
-# CDK stores resolved lookup results here — this file SHOULD be committed
-# (see note in README), so it is deliberately NOT ignored.
+# This repo is public. cdk.context.json holds the account id, VPC / subnet /
+# security-group ids, KMS ARN and the resolved subnet layout — a map of the
+# AWS environment. We keep it (and any local context file) OUT of git and
+# supply db:* / env:* context locally instead. See README.
+cdk.context.json
+cdk.context.local.json

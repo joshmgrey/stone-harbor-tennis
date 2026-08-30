@@ -2,6 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as rds from "aws-cdk-lib/aws-rds";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 
 /**
@@ -83,6 +84,18 @@ export interface DatabaseStackProps extends cdk.StackProps {
    * key is fine too but unused). See bottom comment for how.
    */
   readonly masterCredentialsSecretArn: string;
+
+  /**
+   * The live instance IS storage-encrypted. Pass the full ARN of the KMS key
+   * it uses (RDS console -> Configuration -> "AWS KMS key", or the `KmsKeyId`
+   * field from `describe-db-instances`).
+   *
+   * CREATE-ONLY. If the instance uses the AWS-managed default `aws/rds` key
+   * you can usually omit this and CloudFormation resolves the same default —
+   * but if `cdk diff` after import shows a `KmsKeyId` change, set this to the
+   * ARN shown there and re-import.
+   */
+  readonly kmsKeyArn?: string;
 }
 
 export class DatabaseStack extends cdk.Stack {
@@ -184,10 +197,9 @@ export class DatabaseStack extends cdk.Stack {
         ),
       }),
 
-      // t4g.micro — Graviton burstable, the smallest current-gen class.
-      // If your console instance is db.t3.micro (x86) change T4G -> T3.
+      // Live instance is db.t3.micro (x86 burstable).
       instanceType: ec2.InstanceType.of(
-        ec2.InstanceClass.T4G,
+        ec2.InstanceClass.T3,
         ec2.InstanceSize.MICRO,
       ),
 
@@ -216,19 +228,26 @@ export class DatabaseStack extends cdk.Stack {
       ...(props.databaseName ? { databaseName: props.databaseName } : {}),
 
       allocatedStorage: props.allocatedStorageGib,
-      // Storage autoscaling ceiling. If the live instance has "Enable storage
-      // autoscaling" OFF, delete this line so import doesn't see a diff.
-      maxAllocatedStorage: 100,
+      // Live instance has storage autoscaling on with a 1000 GiB ceiling.
+      maxAllocatedStorage: 1000,
 
-      // Console default for new Postgres instances is gp3. If your instance
-      // predates that or shows "gp2", switch to `rds.StorageType.GP2`.
-      storageType: rds.StorageType.GP3,
+      // Live instance is gp2.
+      storageType: rds.StorageType.GP2,
 
-      // DIVERGENCE (likely): console instances are often created WITHOUT
-      // "Encryption" ticked. `storageEncrypted` is immutable — if the live
-      // instance is unencrypted this MUST be `false` for import, and turning
-      // it on later is a snapshot-copy migration. Read the live value.
-      storageEncrypted: false,
+      // Live instance has encryption ENABLED. `storageEncrypted` +
+      // `storageEncryptionKey` are create-only. When `db:kmsKeyArn` is unset
+      // we pass only `storageEncrypted: true` and let CloudFormation resolve
+      // the account's default `aws/rds` key.
+      storageEncrypted: true,
+      ...(props.kmsKeyArn
+        ? {
+            storageEncryptionKey: kms.Key.fromKeyArn(
+              this,
+              "DbKmsKey",
+              props.kmsKeyArn,
+            ),
+          }
+        : {}),
 
       // Single-AZ today (README: Multi-AZ only "if needed"). Toggling this
       // on later is an online change, safe to defer.
@@ -241,11 +260,8 @@ export class DatabaseStack extends cdk.Stack {
       // Keep automated backups if the instance is ever deleted.
       deleteAutomatedBackups: false,
 
-      // DIVERGENCE / RECOMMENDATION: almost certainly OFF on your instance.
-      // Must be `false` to import cleanly; flip to `true` in the very next
-      // deploy — it's a zero-downtime change and stops `cdk destroy` /
-      // console fat-fingers from dropping the league's data.
-      deletionProtection: false,
+      // Live instance already has deletion protection ENABLED.
+      deletionProtection: true,
 
       // CDK's default for DatabaseInstance is SNAPSHOT. RETAIN is safer: if
       // this stack is ever deleted, the instance stays put untouched.
@@ -280,59 +296,49 @@ export class DatabaseStack extends cdk.Stack {
 
 /*
  * ---------------------------------------------------------------------------
- * READING THE LIVE VALUES  (fill the props from this)
+ * CONTEXT  (infra/cdk.context.json — gitignored; this repo is public)
  * ---------------------------------------------------------------------------
+ * The db:* / env:* values below were read from the live "tennis" instance in
+ * us-east-2. To re-derive them:
  *
- *   ID=<your-db-instance-id>
- *
- *   aws rds describe-db-instances --db-instance-identifier "$ID" \
- *     --query 'DBInstances[0].{
- *        engine:EngineVersion,
- *        storage:AllocatedStorage,
- *        storageType:StorageType,
- *        encrypted:StorageEncrypted,
- *        multiAz:MultiAZ,
- *        public:PubliclyAccessible,
- *        backupDays:BackupRetentionPeriod,
+ *   aws rds describe-db-instances --db-instance-identifier tennis \
+ *     --region us-east-2 --query 'DBInstances[0].{
+ *        engine:EngineVersion, storage:AllocatedStorage,
+ *        maxStorage:MaxAllocatedStorage, storageType:StorageType,
+ *        encrypted:StorageEncrypted, kmsKey:KmsKeyId, multiAz:MultiAZ,
+ *        public:PubliclyAccessible, backupDays:BackupRetentionPeriod,
  *        deleteProtection:DeletionProtection,
  *        subnetGroup:DBSubnetGroup.DBSubnetGroupName,
  *        vpc:DBSubnetGroup.VpcId,
  *        sgs:VpcSecurityGroups[].VpcSecurityGroupId,
- *        masterUser:MasterUsername,
- *        dbName:DBName,
- *        instanceClass:DBInstanceClass
- *     }'
+ *        masterUser:MasterUsername, dbName:DBName, class:DBInstanceClass }'
  *
- *   -> masterUser  goes to  db:masterUsername
- *   -> dbName      goes to  db:databaseName  ONLY if non-null; if it prints
- *                  `null` / is absent, leave db:databaseName unset.
+ *   dbName printed "-" / null  ->  leave db:databaseName unset.
  *
- * Create the credentials secret from the password you already have:
+ * Create the credentials secret from the password already in Amplify's
+ * DATABASE_URL, then put its ARN in db:masterSecretArn:
  *
- *   aws secretsmanager create-secret \
+ *   aws secretsmanager create-secret --region us-east-2 \
  *     --name stone-harbor-tennis/rds/master \
  *     --secret-string '{"password":"<CURRENT PASSWORD>"}'
  *
  * ---------------------------------------------------------------------------
  * IMPORT SEQUENCE
  * ---------------------------------------------------------------------------
- *   1. cdk bootstrap                      (once per account/region)
- *   2. cdk synth DatabaseStack            (must synth with concrete env)
- *   3. cdk import DatabaseStack           feed it the DBInstanceIdentifier.
- *                                        The template has ONE resource
- *                                        (AWS::RDS::DBInstance), which is
- *                                        importable, so this succeeds.
- *   4. cdk diff DatabaseStack             MUST be empty — no added/removed
- *                                        resources, no property changes. Any
- *                                        diff means a context value is wrong;
- *                                        fix it, do NOT deploy. (A diff on a
- *                                        create-only prop — DBName,
- *                                        MasterUsername, engine, storage
- *                                        encryption — means a deploy would
- *                                        REPLACE the instance.)
- *   5. commit cdk.context.json
+ *   1. cdk bootstrap aws://<account>/us-east-2      (once)
+ *   2. cdk synth DatabaseStack
+ *   3. cdk import DatabaseStack     feed it the identifier "tennis". The
+ *                                  template is ONE importable resource
+ *                                  (AWS::RDS::DBInstance), so this succeeds.
+ *   4. cdk diff DatabaseStack       MUST be empty — no added/removed
+ *                                  resources, no property changes. Any diff
+ *                                  means a context value is wrong; fix it, do
+ *                                  NOT deploy. A diff on a create-only prop
+ *                                  (DBName, MasterUsername, engine version,
+ *                                  StorageEncrypted, KmsKeyId, instance class)
+ *                                  means a deploy would REPLACE the instance.
  *
- * Only once step 4 is clean do you start changing things (turn on
- * deletionProtection, wire the SecretTargetAttachment, then Path B).
+ * Only once step 4 is clean do you change anything (wire the
+ * SecretTargetAttachment, then Path B / dedicated VPC).
  * ---------------------------------------------------------------------------
  */
