@@ -228,13 +228,11 @@ export class DatabaseStack extends cdk.Stack {
       ...(props.databaseName ? { databaseName: props.databaseName } : {}),
 
       allocatedStorage: props.allocatedStorageGib,
-      // Storage autoscaling ceiling. If the live instance has "Enable storage
-      // autoscaling" OFF, delete this line so import doesn't see a diff.
-      maxAllocatedStorage: 100,
+      // Live instance has storage autoscaling on with a 1000 GiB ceiling.
+      maxAllocatedStorage: 1000,
 
-      // Console default for new Postgres instances is gp3. If your instance
-      // predates that or shows "gp2", switch to `rds.StorageType.GP2`.
-      storageType: rds.StorageType.GP3,
+      // Live instance is gp2.
+      storageType: rds.StorageType.GP2,
 
       // Live instance has encryption ENABLED. `storageEncrypted` +
       // `storageEncryptionKey` are create-only. When `db:kmsKeyArn` is unset
