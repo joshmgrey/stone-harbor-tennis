@@ -87,6 +87,19 @@ export class GitHubDeployStack extends cdk.Stack {
       }),
     );
 
+    // The deploy workflow runs `prisma migrate deploy` directly (the DB is
+    // still public in B2/B3) and reads DATABASE_URL from Secrets Manager to
+    // do it. Scoped to this project's secrets.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "ReadProjectSecrets",
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [
+          `arn:aws:secretsmanager:*:${this.account}:secret:stone-harbor-tennis/*`,
+        ],
+      }),
+    );
+
     new cdk.CfnOutput(this, "DeployRoleArn", {
       value: this.deployRole.roleArn,
       description: "role-to-assume for the GitHub Actions workflow",

@@ -2,6 +2,7 @@
 import * as cdk from "aws-cdk-lib";
 import { DatabaseStack } from "../lib/database-stack";
 import { GitHubDeployStack } from "../lib/github-deploy-stack";
+import { AppStack } from "../lib/app-stack";
 
 const app = new cdk.App();
 
@@ -98,3 +99,20 @@ new GitHubDeployStack(app, "GitHubDeployStack", {
   subjectClaim: opt("github:subjectClaim"),
   existingOidcProviderArn: opt("github:oidcProviderArn"),
 });
+
+// Path B / B2 — the app on Fargate. Only appears in the app tree once its
+// context is set (it builds a Docker image asset, so `cdk` for the other
+// stacks stays usable on a machine without Docker until you opt in).
+if (opt("app:domainName")) {
+  new AppStack(app, "AppStack", {
+    env,
+    description: "Path B: Next.js app on ECS Fargate + ALB in the default VPC",
+    vpcId: req("db:vpcId"),
+    primaryDomain: req("app:domainName"),
+    hostedZoneId: req("app:hostedZoneId"),
+    zoneName: req("app:zoneName"),
+    googleMapsApiKey: opt("app:googleMapsApiKey") ?? "",
+    databaseUrlSecretArn: req("app:databaseUrlSecretArn"),
+    authSecretArn: req("app:authSecretArn"),
+  });
+}
