@@ -9,11 +9,14 @@ export interface GitHubDeployStackProps extends cdk.StackProps {
   readonly ownerRepo: string;
 
   /**
-   * OIDC `sub` claim to trust. Default: this repo's `main` branch only.
-   * Widen (e.g. `repo:owner/repo:*`) only with a reason — a looser claim
-   * lets any branch or PR from the repo assume the role.
+   * OIDC `sub` claims to trust (any one may match).
+   *
+   * Default covers both shapes the deploy workflow can produce: a plain job
+   * on `main`, and a job with `environment: production` (GitHub swaps the
+   * `sub` to `repo:…:environment:<name>` when a job declares an environment —
+   * a trust that only lists the branch ref then silently rejects it).
    */
-  readonly subjectClaim?: string;
+  readonly subjectClaims?: string[];
 
   /**
    * ARN of an existing GitHub OIDC provider in this account. AWS allows only
@@ -51,8 +54,10 @@ export class GitHubDeployStack extends cdk.Stack {
         ],
       }).attrArn;
 
-    const subjectClaim =
-      props.subjectClaim ?? `repo:${props.ownerRepo}:ref:refs/heads/main`;
+    const subjectClaims = props.subjectClaims ?? [
+      `repo:${props.ownerRepo}:ref:refs/heads/main`,
+      `repo:${props.ownerRepo}:environment:production`,
+    ];
 
     this.deployRole = new iam.Role(this, "DeployRole", {
       roleName: "stone-harbor-tennis-github-deploy",
@@ -64,8 +69,9 @@ export class GitHubDeployStack extends cdk.Stack {
         StringEquals: {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
         },
+        // Condition values are OR-ed: the token's `sub` need match only one.
         StringLike: {
-          "token.actions.githubusercontent.com:sub": subjectClaim,
+          "token.actions.githubusercontent.com:sub": subjectClaims,
         },
       }),
     });

@@ -165,6 +165,7 @@ Variables:
 |---|---|
 | `AWS_ACCOUNT_ID` | `462096274792` |
 | `AWS_DEPLOY_ROLE_ARN` | the `DeployRoleArn` from B0 |
+| `VPC_ID` | `vpc-01ae611b3b789af52` (the default VPC) |
 | `HOSTED_ZONE_ID` | `Z0122083131AK1IA1P4HI` |
 | `ZONE_NAME` | `stone-harbor-invitational-tennis.org` |
 | `DATABASE_URL_SECRET_ARN` | ARN from step 1 |
