@@ -35,22 +35,23 @@ export async function POST(
     update: { phone: trimmedPhone ?? undefined },
   });
 
-  // One signup per player per session — a repeat just changes the type.
+  // This form is unauthenticated, so a name that's already on the list can't
+  // change its own spot — that would let anyone move a player between playing
+  // and alternate. The organizer moves people (admin PATCH).
   const existing = await prisma.signup.findFirst({
     where: { session_id: sessionId, player_id: player.id },
   });
-
-  if (existing?.is_alternate === asAlternate) {
+  if (existing) {
     return NextResponse.json(
-      await prisma.signup.findUniqueOrThrow({
-        where: { id: existing.id },
-        include: { player: true },
-      })
+      {
+        error: existing.is_alternate
+          ? "You're already on the alternate list. Ask the organizer if a spot opens up."
+          : "You're already signed up to play this session.",
+      },
+      { status: 409 }
     );
   }
 
-  // Past the no-op early return, a non-alternate request means a new regular
-  // or an alternate moving up — both take a capped seat.
   if (!asAlternate && session._count.signups >= capacity(session)) {
     return NextResponse.json(
       { error: "Session is full — you can still join as an alternate" },
@@ -58,20 +59,14 @@ export async function POST(
     );
   }
 
-  const signup = existing
-    ? await prisma.signup.update({
-        where: { id: existing.id },
-        data: { is_alternate: asAlternate },
-        include: { player: true },
-      })
-    : await prisma.signup.create({
-        data: {
-          session_id: sessionId,
-          player_id: player.id,
-          is_alternate: asAlternate,
-        },
-        include: { player: true },
-      });
+  const signup = await prisma.signup.create({
+    data: {
+      session_id: sessionId,
+      player_id: player.id,
+      is_alternate: asAlternate,
+    },
+    include: { player: true },
+  });
 
-  return NextResponse.json(signup, { status: existing ? 200 : 201 });
+  return NextResponse.json(signup, { status: 201 });
 }
