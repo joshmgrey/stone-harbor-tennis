@@ -247,5 +247,24 @@ DB directly; for `psql` / `prisma studio` you'd tunnel through a bastion
 
 ## B5 — decommission
 
-Delete the Amplify app and `amplify.yml`; delete the old `0.0.0.0/0`
-security group.
+Only once the Fargate app has been stable for a week or two.
+
+1. **`*` wildcard record** — Route 53 → the zone → delete the `*` record (it
+   points at Amplify's CloudFront `d2dqxtu5y326f4.cloudfront.net`, which is
+   about to disappear). apex / www / new. are all explicit records and
+   unaffected.
+2. **Amplify app** — Amplify console → the app → **App settings → General →
+   Delete app**. Then immediately re-check apex + www:
+   `curl -sI https://stone-harbor-invitational-tennis.org` should still be
+   200. If Amplify's teardown removed either record, run
+   `cdk deploy AppStack` — `deleteExisting` recreates them.
+3. **Old RDS security group** — delete `sg-00ad52e709e351b65` (the old
+   `0.0.0.0/0` one). It's been unattached since B4.
+4. **Stale ACM validation CNAMEs** — Route 53 may still have `_...acm-validations`
+   records for Amplify's old cert. Harmless; delete for tidiness.
+5. Code: `amplify.yml` is removed; the main README deployment section is
+   rewritten. `db:securityGroupId` context is dead — drop it from
+   `cdk.context.json`.
+
+Path B complete. The database is private, the app is on Fargate, and there
+is no Amplify.
