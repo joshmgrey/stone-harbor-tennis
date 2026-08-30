@@ -195,10 +195,16 @@ Docker. `cdk synth`/`diff` for it work anywhere.
 
 ## B3 — cut users over
 
-`AppStack` now creates apex + `www.` A-alias records → the ALB.
-`deleteExisting: true` removes Amplify's records for those names immediately
-before creating the new ones (a custom resource) — the gap is seconds, and
-alias records carry no client-cacheable TTL.
+`AppStack` points apex + `www.` at the ALB. `deleteExisting: true` removes
+Amplify's record for each name right before creating the new one (a custom
+resource) — the gap is seconds.
+
+`deleteExisting` only matches the **same record type**. Amplify's apex is an
+A-alias (→ new A-alias, fine). Its `www` is a **CNAME** to the CloudFront
+distribution, so `www` here is also a CNAME (→ the ALB's DNS name) — an
+A-record at `www` would collide with the CNAME and the deploy would half-
+apply (apex swapped, `www` fails, rollback deletes the new apex and leaves
+the apex with no record).
 
 **Before merging B3**, note the current targets so you can roll back:
 
