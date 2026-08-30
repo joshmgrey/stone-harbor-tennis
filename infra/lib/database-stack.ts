@@ -325,12 +325,12 @@ export class DatabaseStack extends cdk.Stack {
  * ---------------------------------------------------------------------------
  * IMPORT SEQUENCE
  * ---------------------------------------------------------------------------
- *   1. cdk bootstrap aws://<account>/us-east-2      (once)
- *   2. cdk synth DatabaseStack
- *   3. cdk import DatabaseStack     feed it the identifier "tennis". The
+ *   (no `cdk bootstrap` — CliCredentialsStackSynthesizer, no assets)
+ *   1. cdk synth DatabaseStack
+ *   2. cdk import DatabaseStack     feed it the identifier "tennis". The
  *                                  template is ONE importable resource
  *                                  (AWS::RDS::DBInstance), so this succeeds.
- *   4. cdk diff DatabaseStack       MUST be empty — no added/removed
+ *   3. cdk diff DatabaseStack       MUST be empty — no added/removed
  *                                  resources, no property changes. Any diff
  *                                  means a context value is wrong; fix it, do
  *                                  NOT deploy. A diff on a create-only prop
