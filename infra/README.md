@@ -82,7 +82,7 @@ the stack carries neither.
 The password is the one already in your Amplify `DATABASE_URL`:
 
 ```bash
-aws secretsmanager create-secret --region us-east-2 --name stone-harbor-tennis/rds/master --secret-string '{"password":"<CURRENT_PASSWORD>"}'
+aws secretsmanager create-secret --region us-east-2 --name stone-harbor-tennis/rds/master --secret-string '{"username":"postgres","password":"<CURRENT_PASSWORD>"}'
 ```
 
 Put the returned ARN in `db:masterSecretArn`.

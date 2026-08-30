@@ -153,10 +153,11 @@ export class DatabaseStack extends cdk.Stack {
     // ---------------------------------------------------------------------
     // 4. Master credentials
     // ---------------------------------------------------------------------
-    // Secrets Manager holds the master password (the same one that's in the
-    // Amplify `DATABASE_URL`). The secret was created by hand as
-    // `{ "password": "..." }` — no `username` key — so the username is passed
-    // explicitly below.
+    // Secrets Manager secret `stone-harbor-tennis/rds/master`. It MUST contain
+    // BOTH `username` and `password` keys:
+    //   {"username":"postgres","password":"<the Amplify DATABASE_URL password>"}
+    // `SecretTargetAttachment` (created by `fromSecret` below) refuses to
+    // attach otherwise: "The keys "username" and "password" must exist".
     //
     // HISTORY: for the initial `cdk import` this stack used
     // `Credentials.fromPassword` and fed the password in as a dynamic
@@ -166,10 +167,10 @@ export class DatabaseStack extends cdk.Stack {
     //
     // Now that the instance is imported, `fromSecret` is safe: the attachment
     // is added by a normal `cdk deploy`. `MasterUsername` / `MasterUserPassword`
-    // render identically to before (same secret, same `password` field), so
-    // the only change is the new attachment resource — no instance change.
-    // The attachment also merges host / port / dbname / engine into the
-    // secret so a future app stack can build the connection from one secret.
+    // render identically to the imported state (same secret, same `password`
+    // field), so the only change is the new attachment resource — no instance
+    // change. The attachment also merges host / port / dbname / engine into
+    // the secret so a future app stack can build the connection from it.
     const credentialsSecret = secretsmanager.Secret.fromSecretCompleteArn(
       this,
       "DbMasterSecret",
@@ -312,11 +313,12 @@ export class DatabaseStack extends cdk.Stack {
  *   dbName printed "-" / null  ->  leave db:databaseName unset.
  *
  * Create the credentials secret from the password already in Amplify's
- * DATABASE_URL, then put its ARN in db:masterSecretArn:
+ * DATABASE_URL, then put its ARN in db:masterSecretArn. BOTH keys are
+ * required (SecretTargetAttachment rejects a secret missing either):
  *
  *   aws secretsmanager create-secret --region us-east-2 \
  *     --name stone-harbor-tennis/rds/master \
- *     --secret-string '{"password":"<CURRENT PASSWORD>"}'
+ *     --secret-string '{"username":"postgres","password":"<CURRENT PASSWORD>"}'
  *
  * ---------------------------------------------------------------------------
  * IMPORT SEQUENCE
