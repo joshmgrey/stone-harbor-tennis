@@ -11,7 +11,11 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - "package*.json"
+      # everything `next build` / `prisma generate` read from the repo root
       - "next.config.ts"
+      - "prisma.config.ts"
+      - "tsconfig.json"
+      - "postcss.config.mjs"
       - "prisma/**"
       - "src/**"
       - "public/**"
