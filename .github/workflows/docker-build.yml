@@ -4,24 +4,18 @@ name: docker-build
 # no virtualization for Docker. No push, no AWS: this only proves the
 # Dockerfile builds and the container serves. The deploy pipeline is B2.
 
+# PRs only — on main, deploy.yml builds the same image via `cdk deploy`.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "package*.json"
-      - "next.config.ts"
-      - "prisma/**"
-      - "src/**"
-      - "public/**"
-      - ".github/workflows/docker-build.yml"
   pull_request:
     paths:
       - "Dockerfile"
       - ".dockerignore"
       - "package*.json"
+      # everything `next build` / `prisma generate` read from the repo root
       - "next.config.ts"
+      - "prisma.config.ts"
+      - "tsconfig.json"
+      - "postcss.config.mjs"
       - "prisma/**"
       - "src/**"
       - "public/**"

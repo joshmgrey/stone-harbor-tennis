@@ -115,12 +115,98 @@ reports and re-run `cdk import`.
 
 ## After a clean import
 
-1. **Secret attachment — done.** Credentials use `rds.Credentials.fromSecret`,
-   which adds `AWS::SecretsManager::SecretTargetAttachment`. `MasterUsername` /
-   `MasterUserPassword` render identically to the imported state, so
-   `cdk deploy` adds only the attachment — no instance change. The attachment
-   merges `host` / `port` / `dbname` / `engine` into the secret alongside
-   `password`, so a future app stack can build the connection from one secret.
-2. Path B / Phase A2: introduce the dedicated VPC. An RDS instance can't
-   change VPC in place, so this is snapshot → restore into the new VPC →
-   repoint `DATABASE_URL` → retire the old instance.
+**Secret attachment — done.** Credentials use `rds.Credentials.fromSecret`,
+which adds `AWS::SecretsManager::SecretTargetAttachment` (a plain `cdk
+deploy`, no instance change). The secret now also carries `host` / `port` /
+`dbname` / `engine`.
+
+---
+
+# Path B — app off Amplify, database private
+
+Stacks beyond `DatabaseStack`:
+
+| Stack | Deploy from | Notes |
+|---|---|---|
+| `GitHubDeployStack` | laptop (once) | OIDC provider + `cdk deploy` role for CI |
+| `AppStack` | CI only | Docker image asset; only in the tree when `app:domainName` is set |
+
+## B0 — bootstrap + deploy role
+
+```bash
+cd infra
+npx cdk bootstrap aws://462096274792/us-east-2
+npx cdk deploy GitHubDeployStack
+```
+
+Note the `DeployRoleArn` output.
+
+## B2 — Fargate app
+
+### 1. Two secrets (once)
+
+```bash
+aws secretsmanager create-secret --region us-east-2 \
+  --name stone-harbor-tennis/app/auth-secret \
+  --secret-string '<the admin password currently in Amplify>'
+
+aws secretsmanager create-secret --region us-east-2 \
+  --name stone-harbor-tennis/app/database-url \
+  --secret-string 'postgresql://postgres:<PW>@tennis.<...>.us-east-2.rds.amazonaws.com:5432/postgres'
+```
+
+### 2. GitHub repo config
+
+**Settings → Secrets and variables → Actions**
+
+Variables:
+
+| Name | Value |
+|---|---|
+| `AWS_ACCOUNT_ID` | `462096274792` |
+| `AWS_DEPLOY_ROLE_ARN` | the `DeployRoleArn` from B0 |
+| `VPC_ID` | `vpc-01ae611b3b789af52` (the default VPC) |
+| `HOSTED_ZONE_ID` | `Z0122083131AK1IA1P4HI` |
+| `ZONE_NAME` | `stone-harbor-invitational-tennis.org` |
+| `DATABASE_URL_SECRET_ARN` | ARN from step 1 |
+| `AUTH_SECRET_ARN` | ARN from step 1 |
+
+Secret:
+
+| Name | Value |
+|---|---|
+| `GOOGLE_MAPS_API_KEY` | the `NEXT_PUBLIC_` Maps key |
+
+### 3. Deploy
+
+Merging B2 to `main` runs `.github/workflows/deploy.yml`: `prisma migrate
+deploy` (DB still public) → `cdk deploy AppStack` (builds the image, creates
+the ALB + service). Or trigger it manually with **Run workflow**.
+
+The ACM cert (DNS-validated) covers the apex, `www.`, **and**
+`new.<ZONE_NAME>`. Only `new.<ZONE_NAME>` gets a Route 53 record now — that's
+the B2/B3 test URL. Verify the whole app at
+`https://new.stone-harbor-invitational-tennis.org`: admin login, sign-ups,
+pairings, calendar feed. It's talking to the **same** database as the live
+Amplify site.
+
+`AppStack` deploys from CI only — the image is a Docker asset and needs
+Docker. `cdk synth`/`diff` for it work anywhere.
+
+## B3 — cut users over
+
+Add the apex + `www.` alias records → the ALB, in `AppStack`. Lower the DNS
+TTL a day ahead. Amplify stays deployed as the rollback.
+
+## B4 — database private
+
+`database-stack.ts`: `publiclyAccessible: false`, and a CDK-managed SG that
+admits 5432 only from `db:appSecurityGroupId` (the `ServiceSecurityGroupId`
+output of `AppStack`). `cdk deploy DatabaseStack` from your laptop — an
+in-place modify, ~30 s connection blip. After this the migration step in
+`deploy.yml` has to move to an in-VPC ECS task.
+
+## B5 — decommission
+
+Delete the Amplify app and `amplify.yml`; delete the old `0.0.0.0/0`
+security group.
