@@ -195,8 +195,21 @@ Docker. `cdk synth`/`diff` for it work anywhere.
 
 ## B3 — cut users over
 
-Add the apex + `www.` alias records → the ALB, in `AppStack`. Lower the DNS
-TTL a day ahead. Amplify stays deployed as the rollback.
+`AppStack` now creates apex + `www.` A-alias records → the ALB.
+`deleteExisting: true` removes Amplify's records for those names immediately
+before creating the new ones (a custom resource) — the gap is seconds, and
+alias records carry no client-cacheable TTL.
+
+**Before merging B3**, note the current targets so you can roll back:
+
+```bash
+aws route53 list-resource-record-sets --hosted-zone-id Z0122083131AK1IA1P4HI \
+  --query "ResourceRecordSets[?Name=='stone-harbor-invitational-tennis.org.' || Name=='www.stone-harbor-invitational-tennis.org.']"
+```
+
+Merging B3 → `deploy.yml` runs → the cutover happens. Amplify stays deployed
+and serving; rollback is recreating those two records against the Amplify
+target from the output above.
 
 ## B4 — database private
 
