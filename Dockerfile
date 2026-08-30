@@ -49,6 +49,9 @@ RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S nextjs -G nodejs
 # static assets and public/ are copied in separately per the Next.js docs.
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# `public/` is currently empty (kept by .gitkeep) — the app's icon is an
+# app-dir metadata file, not a static asset. server.js still serves anything
+# dropped here later.
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # Insurance: the generated Prisma client, in case file tracing missed it.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
