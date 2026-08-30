@@ -12,9 +12,11 @@ const app = new cdk.App();
  *
  *   aws rds describe-db-instances --db-instance-identifier <ID> \
  *     --query 'DBInstances[0].{engine:EngineVersion,storage:AllocatedStorage,
+ *       maxStorage:MaxAllocatedStorage,storageType:StorageType,
  *       subnetGroup:DBSubnetGroup.DBSubnetGroupName,vpc:DBSubnetGroup.VpcId,
  *       sgs:VpcSecurityGroups[].VpcSecurityGroupId,masterUser:MasterUsername,
- *       dbName:DBName,class:DBInstanceClass,encrypted:StorageEncrypted}'
+ *       dbName:DBName,class:DBInstanceClass,encrypted:StorageEncrypted,
+ *       kmsKey:KmsKeyId,multiAz:MultiAZ}'
  */
 function req(key: string): string {
   const value = app.node.tryGetContext(key);
@@ -67,6 +69,11 @@ new DatabaseStack(app, "DatabaseStack", {
   // Optional: set ONLY if `describe-db-instances` shows a non-null DBName.
   // Create-only — a wrong value here replaces the instance on deploy.
   databaseName: opt("db:databaseName"),
+
+  // Optional: the KMS key ARN the encrypted instance uses. Omit to let
+  // CloudFormation resolve the default aws/rds key; set it if `cdk diff`
+  // after import shows a KmsKeyId change.
+  kmsKeyArn: opt("db:kmsKeyArn"),
 
   tags: {
     project: "stone-harbor-tennis",

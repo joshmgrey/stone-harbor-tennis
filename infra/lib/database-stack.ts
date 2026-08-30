@@ -2,6 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as rds from "aws-cdk-lib/aws-rds";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 
 /**
@@ -83,6 +84,18 @@ export interface DatabaseStackProps extends cdk.StackProps {
    * key is fine too but unused). See bottom comment for how.
    */
   readonly masterCredentialsSecretArn: string;
+
+  /**
+   * The live instance IS storage-encrypted. Pass the full ARN of the KMS key
+   * it uses (RDS console -> Configuration -> "AWS KMS key", or the `KmsKeyId`
+   * field from `describe-db-instances`).
+   *
+   * CREATE-ONLY. If the instance uses the AWS-managed default `aws/rds` key
+   * you can usually omit this and CloudFormation resolves the same default —
+   * but if `cdk diff` after import shows a `KmsKeyId` change, set this to the
+   * ARN shown there and re-import.
+   */
+  readonly kmsKeyArn?: string;
 }
 
 export class DatabaseStack extends cdk.Stack {
@@ -184,10 +197,9 @@ export class DatabaseStack extends cdk.Stack {
         ),
       }),
 
-      // t4g.micro — Graviton burstable, the smallest current-gen class.
-      // If your console instance is db.t3.micro (x86) change T4G -> T3.
+      // Live instance is db.t3.micro (x86 burstable).
       instanceType: ec2.InstanceType.of(
-        ec2.InstanceClass.T4G,
+        ec2.InstanceClass.T3,
         ec2.InstanceSize.MICRO,
       ),
 
@@ -224,11 +236,20 @@ export class DatabaseStack extends cdk.Stack {
       // predates that or shows "gp2", switch to `rds.StorageType.GP2`.
       storageType: rds.StorageType.GP3,
 
-      // DIVERGENCE (likely): console instances are often created WITHOUT
-      // "Encryption" ticked. `storageEncrypted` is immutable — if the live
-      // instance is unencrypted this MUST be `false` for import, and turning
-      // it on later is a snapshot-copy migration. Read the live value.
-      storageEncrypted: false,
+      // Live instance has encryption ENABLED. `storageEncrypted` +
+      // `storageEncryptionKey` are create-only. When `db:kmsKeyArn` is unset
+      // we pass only `storageEncrypted: true` and let CloudFormation resolve
+      // the account's default `aws/rds` key.
+      storageEncrypted: true,
+      ...(props.kmsKeyArn
+        ? {
+            storageEncryptionKey: kms.Key.fromKeyArn(
+              this,
+              "DbKmsKey",
+              props.kmsKeyArn,
+            ),
+          }
+        : {}),
 
       // Single-AZ today (README: Multi-AZ only "if needed"). Toggling this
       // on later is an online change, safe to defer.
@@ -241,11 +262,8 @@ export class DatabaseStack extends cdk.Stack {
       // Keep automated backups if the instance is ever deleted.
       deleteAutomatedBackups: false,
 
-      // DIVERGENCE / RECOMMENDATION: almost certainly OFF on your instance.
-      // Must be `false` to import cleanly; flip to `true` in the very next
-      // deploy — it's a zero-downtime change and stops `cdk destroy` /
-      // console fat-fingers from dropping the league's data.
-      deletionProtection: false,
+      // Live instance already has deletion protection ENABLED.
+      deletionProtection: true,
 
       // CDK's default for DatabaseInstance is SNAPSHOT. RETAIN is safer: if
       // this stack is ever deleted, the instance stays put untouched.
