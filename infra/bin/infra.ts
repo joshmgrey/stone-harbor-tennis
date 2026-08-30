@@ -57,6 +57,13 @@ new DatabaseStack(app, "DatabaseStack", {
   description:
     "Path A: adopts the manually-provisioned Stone Harbor tennis RDS instance",
 
+  // Use the CLI's own credentials for every CloudFormation call instead of
+  // the bootstrap deploy/exec roles. The DefaultStackSynthesizer passes a
+  // `RoleARN` on the change set, which CloudFormation rejects for IMPORT
+  // operations ("you cannot modify or add [RoleArn, Tags]"). This stack has
+  // no file/Docker assets, so it needs nothing from the bootstrap stack.
+  synthesizer: new cdk.CliCredentialsStackSynthesizer(),
+
   dbInstanceIdentifier: req("db:instanceIdentifier"),
   engineVersion: req("db:engineVersion"),
   allocatedStorageGib: Number(req("db:allocatedStorageGib")),
@@ -74,9 +81,9 @@ new DatabaseStack(app, "DatabaseStack", {
   // CloudFormation resolve the default aws/rds key; set it if `cdk diff`
   // after import shows a KmsKeyId change.
   kmsKeyArn: opt("db:kmsKeyArn"),
-
-  tags: {
-    project: "stone-harbor-tennis",
-    managedBy: "cdk",
-  },
 });
+
+// NOTE: no stack tags. `cdk import` fails with "you cannot modify or add
+// [RoleArn, Tags]" if the IMPORT change set carries stack-level tags. Add
+// tags in a follow-up `cdk deploy` after the import is clean:
+//   cdk.Tags.of(app).add("project", "stone-harbor-tennis");

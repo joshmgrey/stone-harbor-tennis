@@ -71,9 +71,11 @@ instance): `db.t3.micro`, `gp2`, storage encrypted, autoscaling ceiling
 cd infra && npm install
 ```
 
-```bash
-npx cdk bootstrap aws://<ACCOUNT_ID>/us-east-2
-```
+`cdk bootstrap` is **not** required. This stack uses
+`CliCredentialsStackSynthesizer` (see `bin/infra.ts`) — every CloudFormation
+call runs with your CLI credentials, no bootstrap roles or staging bucket.
+`cdk import` rejects the bootstrap exec role (`RoleArn`) and stack tags, so
+the stack carries neither.
 
 ## Create the credentials secret
 
