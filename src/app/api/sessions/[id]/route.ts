@@ -10,7 +10,9 @@ export async function GET(
 
   const session = await prisma.session.findUnique({
     where: { id: Number(id) },
-    include: { _count: { select: { signups: true } } },
+    include: {
+      _count: { select: { signups: { where: { is_alternate: false } } } },
+    },
   });
 
   if (!session) {
@@ -19,11 +21,12 @@ export async function GET(
 
   const signups = await prisma.signup.findMany({
     where: { session_id: Number(id) },
-    orderBy: { signed_up_at: "asc" },
+    // Regulars first (by sign-up time), then alternates in join order.
+    orderBy: [{ is_alternate: "asc" }, { signed_up_at: "asc" }],
     include: { player: true },
   });
 
-  const { _count, ...rest } = session;
+  const { _count, max_players: _drop, ...rest } = session;
   return NextResponse.json({
     session: { ...rest, signup_count: _count.signups },
     signups,

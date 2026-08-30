@@ -5,9 +5,9 @@ export interface Session {
   end_time: string;
   location: string;
   courts: number;
-  max_players: number;
   notes: string | null;
   created_at: string;
+  /** Regular (non-alternate) sign-ups. */
   signup_count?: number;
 }
 
@@ -16,6 +16,7 @@ export interface Signup {
   session_id: number;
   player_id: number;
   player: Player;
+  is_alternate: boolean;
   signed_up_at: string;
 }
 

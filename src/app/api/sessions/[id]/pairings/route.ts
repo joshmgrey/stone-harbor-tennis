@@ -23,8 +23,9 @@ export async function POST(
   }
 
   const { id } = await params;
+  // Alternates are standbys — they don't get court assignments.
   const signups = await prisma.signup.findMany({
-    where: { session_id: Number(id) },
+    where: { session_id: Number(id), is_alternate: false },
     orderBy: { signed_up_at: "asc" },
     include: { player: true },
   });
