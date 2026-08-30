@@ -115,10 +115,12 @@ reports and re-run `cdk import`.
 
 ## After a clean import
 
-1. Switch credentials to `rds.Credentials.fromSecret(secret, username)` and
-   `npx cdk deploy`. That adds the `AWS::SecretsManager::SecretTargetAttachment`
-   which writes host/port/dbname into the secret for a future app stack.
-   Fine as a normal deploy — it just can't be present during `cdk import`.
+1. **Secret attachment — done.** Credentials use `rds.Credentials.fromSecret`,
+   which adds `AWS::SecretsManager::SecretTargetAttachment`. `MasterUsername` /
+   `MasterUserPassword` render identically to the imported state, so
+   `cdk deploy` adds only the attachment — no instance change. The attachment
+   merges `host` / `port` / `dbname` / `engine` into the secret alongside
+   `password`, so a future app stack can build the connection from one secret.
 2. Path B / Phase A2: introduce the dedicated VPC. An RDS instance can't
    change VPC in place, so this is snapshot → restore into the new VPC →
    repoint `DATABASE_URL` → retire the old instance.
