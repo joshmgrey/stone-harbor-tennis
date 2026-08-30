@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib";
 import { DatabaseStack } from "../lib/database-stack";
+import { GitHubDeployStack } from "../lib/github-deploy-stack";
 
 const app = new cdk.App();
 
@@ -83,7 +84,17 @@ new DatabaseStack(app, "DatabaseStack", {
   kmsKeyArn: opt("db:kmsKeyArn"),
 });
 
-// NOTE: no stack tags. `cdk import` fails with "you cannot modify or add
-// [RoleArn, Tags]" if the IMPORT change set carries stack-level tags. Add
-// tags in a follow-up `cdk deploy` after the import is clean:
+// NOTE: no stack tags on DatabaseStack. `cdk import` fails with "you cannot
+// modify or add [RoleArn, Tags]" if the IMPORT change set carries stack-level
+// tags. Add tags in a follow-up `cdk deploy` after the import is clean:
 //   cdk.Tags.of(app).add("project", "stone-harbor-tennis");
+
+// Path B / B0 — OIDC role for `cdk deploy` from GitHub Actions.
+// Deploy once from your laptop after `cdk bootstrap`.
+new GitHubDeployStack(app, "GitHubDeployStack", {
+  env,
+  description: "OIDC provider + role for cdk deploy from GitHub Actions",
+  ownerRepo: opt("github:ownerRepo") ?? "joshmgrey/stone-harbor-tennis",
+  subjectClaim: opt("github:subjectClaim"),
+  existingOidcProviderArn: opt("github:oidcProviderArn"),
+});
