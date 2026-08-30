@@ -1,11 +1,11 @@
 name: deploy
 
-# Path B / B2 — deploy the Fargate app on merge to main.
-#   1. prisma migrate deploy  (DB is still public in B2/B3; B4 moves this
-#      into an in-VPC ECS task)
-#   2. cdk deploy AppStack     (builds the Docker image asset, updates ECS)
+# Path B — deploy the Fargate app on merge to main: `cdk deploy AppStack`
+# (builds the Docker image asset, updates ECS). Auth is GitHub OIDC into the
+# role from GitHubDeployStack — no stored keys.
 #
-# Auth is GitHub OIDC into the role from GitHubDeployStack — no stored keys.
+# Migrations are NOT here — run `migrate.yml` by hand when a change ships a
+# new migration (rare, deliberate, and the DB is private as of B4).
 
 on:
   push:
@@ -45,24 +45,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: infra/package-lock.json
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-2
 
-      - name: Install dependencies
-        run: |
-          npm ci
-          npm --prefix infra ci
-
-      - name: Run database migrations
-        run: |
-          DATABASE_URL="$(aws secretsmanager get-secret-value \
-            --secret-id '${{ vars.DATABASE_URL_SECRET_ARN }}' \
-            --query SecretString --output text)"
-          export DATABASE_URL
-          npx prisma migrate deploy
+      - name: Install infra dependencies
+        run: npm --prefix infra ci
 
       - name: Deploy AppStack
         working-directory: infra

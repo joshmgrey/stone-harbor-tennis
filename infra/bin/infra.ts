@@ -76,7 +76,7 @@ if (opt("db:instanceIdentifier")) {
     allocatedStorageGib: Number(req("db:allocatedStorageGib")),
     vpcId: req("db:vpcId"),
     dbSubnetGroupName: req("db:subnetGroupName"),
-    dbSecurityGroupId: req("db:securityGroupId"),
+    appSecurityGroupId: req("db:appSecurityGroupId"),
     masterUsername: req("db:masterUsername"),
     masterCredentialsSecretArn: req("db:masterSecretArn"),
 
