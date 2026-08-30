@@ -93,7 +93,7 @@ The app first ran on AWS Amplify with a publicly-accessible RDS instance — Amp
 ## Local Development
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 24
 - PostgreSQL 17 running locally
 
 ### Setup
