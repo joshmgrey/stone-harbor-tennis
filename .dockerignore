@@ -1,0 +1,27 @@
+# Build context excludes — keep the image small and the build reproducible.
+.git
+.github
+.claude
+.vscode
+node_modules
+.next
+out
+build
+coverage
+
+infra
+*.md
+LICENSE
+
+.env
+.env.*
+!.env.example
+
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+npm-debug.log*
+*.tsbuildinfo
+.DS_Store
+league.db
