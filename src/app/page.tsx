@@ -1,11 +1,21 @@
 import Link from "next/link";
+import { prisma } from "@/lib/prisma";
 import type { Session } from "@/types";
 
+export const dynamic = "force-dynamic";
+
+// Query the DB directly, like every other page — no self-fetch, no
+// NEXT_PUBLIC_BASE_URL. Mirrors GET /api/sessions.
 async function getSessions(): Promise<Session[]> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
-  const res = await fetch(`${base}/api/sessions`, { cache: "no-store" });
-  if (!res.ok) return [];
-  return res.json();
+  const sessions = await prisma.session.findMany({
+    orderBy: [{ date: "asc" }, { start_time: "asc" }],
+    include: { _count: { select: { signups: true } } },
+  });
+  return sessions.map(({ _count, created_at, ...rest }) => ({
+    ...rest,
+    created_at: created_at.toISOString(),
+    signup_count: _count.signups,
+  }));
 }
 
 function formatDate(dateStr: string) {
