@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Session } from "@/types";
+import { capacity, PLAYERS_PER_COURT } from "@/lib/session";
 
 const DEFAULT_LOCATION = "Stone Harbor Tennis Courts";
 
@@ -40,7 +41,6 @@ export default function AdminDashboard() {
   const [endTime, setEndTime] = useState("11:00");
   const [location, setLocation] = useState(DEFAULT_LOCATION);
   const [courts, setCourts] = useState(2);
-  const [maxPlayers, setMaxPlayers] = useState(16);
   const [notes, setNotes] = useState("");
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState("");
@@ -74,7 +74,6 @@ export default function AdminDashboard() {
           end_time: endTime,
           location,
           courts,
-          max_players: maxPlayers,
           notes: notes.trim() || undefined,
         }),
       });
@@ -170,29 +169,20 @@ export default function AdminDashboard() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Courts</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={courts}
-                    onChange={(e) => setCourts(Number(e.target.value))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Max Players</label>
-                  <input
-                    type="number"
-                    min={4}
-                    max={100}
-                    value={maxPlayers}
-                    onChange={(e) => setMaxPlayers(Number(e.target.value))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Courts</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={courts}
+                  onChange={(e) => setCourts(Math.max(1, Number(e.target.value)))}
+                  className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  {PLAYERS_PER_COURT} players per court &middot; seats{" "}
+                  {courts * PLAYERS_PER_COURT}. Extra sign-ups become alternates.
+                </p>
               </div>
 
               <div>
@@ -256,7 +246,7 @@ export default function AdminDashboard() {
                   <div className="text-gray-500 text-xs mt-0.5">
                     {formatTime(s.start_time)} – {formatTime(s.end_time)} &nbsp;·&nbsp;{" "}
                     {s.courts} court{s.courts !== 1 ? "s" : ""} &nbsp;·&nbsp;{" "}
-                    {s.signup_count ?? 0}/{s.max_players} players
+                    {s.signup_count ?? 0}/{capacity(s)} players
                   </div>
                   {s.notes && (
                     <div className="text-gray-400 text-xs mt-0.5 italic truncate">{s.notes}</div>

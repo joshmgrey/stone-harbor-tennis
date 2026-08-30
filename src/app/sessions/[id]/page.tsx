@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { Session, Signup, Pairing, Player } from "@/types";
+import { capacity } from "@/lib/session";
 import MapEmbed from "@/components/MapEmbed";
 
 function formatDate(dateStr: string) {
@@ -70,15 +71,17 @@ export default function SessionPage() {
   function handleNameChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value;
     setName(val);
-    // Auto-fill phone when an exact known player is selected
     const match = knownPlayers.find(
       (p) => p.name.toLowerCase() === val.trim().toLowerCase()
     );
     if (match?.phone) setPhone(match.phone);
   }
 
-  async function handleSignup(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitSignup(asAlternate: boolean) {
+    if (!name.trim()) {
+      setError("Please enter your name.");
+      return;
+    }
     setError("");
     setSuccess("");
     setSubmitting(true);
@@ -86,13 +89,21 @@ export default function SessionPage() {
       const res = await fetch(`/api/sessions/${id}/signups`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), phone: phone.trim() || undefined }),
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim() || undefined,
+          is_alternate: asAlternate,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Something went wrong");
       } else {
-        setSuccess(`You're signed up, ${name.trim()}! See you on the court! 🎾`);
+        setSuccess(
+          asAlternate
+            ? `You're on the alternate list, ${name.trim()} — we'll text you if a spot opens. 🎾`
+            : `You're signed up, ${name.trim()}! See you on the court! 🎾`
+        );
         setName("");
         setPhone("");
         load();
@@ -121,14 +132,22 @@ export default function SessionPage() {
     );
   }
 
-  const spotsLeft = session.max_players - signups.length;
+  const regulars = signups.filter((s) => !s.is_alternate);
+  const alternates = signups.filter((s) => s.is_alternate);
+  const seats = capacity(session);
+  const spotsLeft = seats - regulars.length;
   const full = spotsLeft <= 0;
   const future = isFuture(session.date);
 
   const pairedPlayers = new Set(
-    pairings.flatMap((p) => [p.team1_player1, p.team1_player2, p.team2_player1, p.team2_player2])
+    pairings.flatMap((p) => [
+      p.team1_player1,
+      p.team1_player2,
+      p.team2_player1,
+      p.team2_player2,
+    ])
   );
-  const sittingOut = signups.filter((s) => !pairedPlayers.has(s.player.name));
+  const sittingOut = regulars.filter((s) => !pairedPlayers.has(s.player.name));
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -143,7 +162,10 @@ export default function SessionPage() {
           <span>🕐 {formatTime(session.start_time)} – {formatTime(session.end_time)}</span>
           <span>📍 {session.location}</span>
           <span>🎾 {session.courts} court{session.courts !== 1 ? "s" : ""}</span>
-          <span>👥 {signups.length} / {session.max_players} players</span>
+          <span>👥 {regulars.length} / {seats} players</span>
+          {alternates.length > 0 && (
+            <span>🔁 {alternates.length} alternate{alternates.length !== 1 ? "s" : ""}</span>
+          )}
         </div>
         {session.notes && (
           <p className="mt-3 text-sm text-gray-500 bg-gray-50 rounded-lg px-3 py-2 italic">
@@ -154,7 +176,7 @@ export default function SessionPage() {
           <div className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${
             full ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
           }`}>
-            {full ? "⛔ Session Full" : `✅ ${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} remaining`}
+            {full ? "⛔ Roster full — alternates welcome" : `✅ ${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} remaining`}
           </div>
         )}
       </div>
@@ -200,11 +222,24 @@ export default function SessionPage() {
         </div>
       )}
 
-      {/* Sign up form */}
-      {future && !full && (
+      {/* Sign up */}
+      {future && (
         <div className="bg-white border border-green-200 rounded-2xl shadow-sm p-6 mb-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Sign Up</h2>
-          <form onSubmit={handleSignup} className="space-y-4">
+          <h2 className="text-lg font-bold text-gray-800 mb-1">
+            {full ? "Join as an Alternate" : "Sign Up"}
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            {full
+              ? "The roster's full, but alternates get first call if someone drops."
+              : "Or join as an alternate if you can't fully commit yet."}
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitSignup(full);
+            }}
+            className="space-y-4"
+          >
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Your Name <span className="text-red-500">*</span>
@@ -251,32 +286,39 @@ export default function SessionPage() {
                 {success}
               </div>
             )}
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors text-sm"
-            >
-              {submitting ? "Signing up…" : "Sign Me Up! 🎾"}
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              {!full && (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors text-sm"
+                >
+                  {submitting ? "Signing up…" : "Sign Me Up! 🎾"}
+                </button>
+              )}
+              <button
+                type={full ? "submit" : "button"}
+                onClick={full ? undefined : () => submitSignup(true)}
+                disabled={submitting}
+                className={`${full ? "flex-1 bg-green-700 hover:bg-green-800 text-white" : "sm:w-auto bg-white border border-green-300 hover:bg-green-50 text-green-800"} disabled:opacity-50 font-semibold py-2.5 px-4 rounded-lg transition-colors text-sm`}
+              >
+                {submitting ? "Adding…" : full ? "Add Me as an Alternate" : "Join as alternate"}
+              </button>
+            </div>
           </form>
         </div>
       )}
 
-      {future && full && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-center text-red-700 mb-6">
-          <div className="font-semibold">This session is full.</div>
-          <div className="text-sm mt-1">Contact the organizer if you need to be added.</div>
-        </div>
-      )}
-
-      {/* Player list */}
+      {/* Roster */}
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
-        <h2 className="text-lg font-bold text-gray-800 mb-3">Players ({signups.length})</h2>
-        {signups.length === 0 ? (
+        <h2 className="text-lg font-bold text-gray-800 mb-3">
+          Playing ({regulars.length}/{seats})
+        </h2>
+        {regulars.length === 0 ? (
           <p className="text-gray-500 text-sm">No one has signed up yet. Be the first!</p>
         ) : (
           <ul className="divide-y divide-gray-100">
-            {signups.map((s, i) => (
+            {regulars.map((s, i) => (
               <li key={s.id} className="flex items-center gap-3 py-2.5">
                 <span className="text-gray-400 text-sm w-5 text-right shrink-0">{i + 1}.</span>
                 <span className="font-medium text-gray-800">{s.player.name}</span>
@@ -286,6 +328,25 @@ export default function SessionPage() {
               </li>
             ))}
           </ul>
+        )}
+
+        {alternates.length > 0 && (
+          <>
+            <h3 className="text-sm font-bold text-gray-600 mt-5 mb-2">
+              Alternates ({alternates.length})
+            </h3>
+            <ul className="divide-y divide-gray-100">
+              {alternates.map((s, i) => (
+                <li key={s.id} className="flex items-center gap-3 py-2">
+                  <span className="text-gray-300 text-sm w-5 text-right shrink-0">{i + 1}.</span>
+                  <span className="text-gray-600">{s.player.name}</span>
+                  {s.player.phone && (
+                    <span className="text-gray-300 text-xs ml-auto">{s.player.phone}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
     </div>

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Session, Signup, Pairing } from "@/types";
+import { capacity } from "@/lib/session";
 
 function formatDate(dateStr: string) {
   const [y, mo, d] = dateStr.split("-").map(Number);
@@ -31,7 +32,7 @@ export default function AdminSessionPage() {
   const [sittingOut, setSittingOut] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [removingId, setRemovingId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [pairingError, setPairingError] = useState("");
 
   const load = useCallback(async () => {
@@ -44,7 +45,6 @@ export default function AdminSessionPage() {
       setSession(data.session);
       setSignups(data.signups);
     } else {
-      // Might not be admin
       router.push("/admin");
     }
     if (pairingsRes.ok) {
@@ -75,9 +75,20 @@ export default function AdminSessionPage() {
   }
 
   async function handleRemoveSignup(signupId: number) {
-    setRemovingId(signupId);
+    setBusyId(signupId);
     await fetch(`/api/sessions/${id}/signups/${signupId}`, { method: "DELETE" });
-    setRemovingId(null);
+    setBusyId(null);
+    load();
+  }
+
+  async function handleToggleAlternate(signupId: number, makeAlternate: boolean) {
+    setBusyId(signupId);
+    await fetch(`/api/sessions/${id}/signups/${signupId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_alternate: makeAlternate }),
+    });
+    setBusyId(null);
     load();
   }
 
@@ -100,14 +111,51 @@ export default function AdminSessionPage() {
     );
   }
 
-  // Compute sitting out from signups not in any pairing
+  const regulars = signups.filter((s) => !s.is_alternate);
+  const alternates = signups.filter((s) => s.is_alternate);
+  const seats = capacity(session);
+
   const pairedNames = new Set(
-    pairings.flatMap((p) => [p.team1_player1, p.team1_player2, p.team2_player1, p.team2_player2])
+    pairings.flatMap((p) => [
+      p.team1_player1,
+      p.team1_player2,
+      p.team2_player1,
+      p.team2_player2,
+    ])
   );
   const computedSittingOut =
     sittingOut.length > 0
       ? sittingOut
-      : signups.filter((s) => !pairedNames.has(s.player.name)).map((s) => s.player.name);
+      : regulars.filter((s) => !pairedNames.has(s.player.name)).map((s) => s.player.name);
+
+  function signupRow(s: Signup, index: number) {
+    return (
+      <li key={s.id} className="flex items-center gap-3 py-3">
+        <span className="text-gray-400 text-sm w-6 text-right shrink-0">{index + 1}.</span>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-gray-900">{s.player.name}</div>
+          {s.player.phone && (
+            <div className="text-gray-400 text-xs">{s.player.phone}</div>
+          )}
+        </div>
+        <button
+          onClick={() => handleToggleAlternate(s.id, !s.is_alternate)}
+          disabled={busyId === s.id}
+          className="shrink-0 text-xs font-medium text-green-700 hover:text-green-900 disabled:opacity-40 px-2 py-1 rounded transition-colors"
+        >
+          {s.is_alternate ? "→ Playing" : "→ Alternate"}
+        </button>
+        <button
+          onClick={() => handleRemoveSignup(s.id)}
+          disabled={busyId === s.id}
+          className="shrink-0 text-red-400 hover:text-red-600 disabled:opacity-40 text-sm transition-colors px-2"
+          title="Remove player"
+        >
+          {busyId === s.id ? "…" : "✕"}
+        </button>
+      </li>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -133,8 +181,13 @@ export default function AdminSessionPage() {
             )}
           </div>
           <div className="text-right shrink-0">
-            <div className="text-2xl font-black text-green-700">{signups.length}</div>
-            <div className="text-xs text-gray-500">/ {session.max_players} players</div>
+            <div className="text-2xl font-black text-green-700">{regulars.length}</div>
+            <div className="text-xs text-gray-500">/ {seats} playing</div>
+            {alternates.length > 0 && (
+              <div className="text-xs text-gray-400 mt-1">
+                +{alternates.length} alt{alternates.length !== 1 ? "s" : ""}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -145,8 +198,8 @@ export default function AdminSessionPage() {
           <h2 className="text-lg font-bold text-gray-800">Court Pairings</h2>
           <button
             onClick={handleGeneratePairings}
-            disabled={generating || signups.length < 4}
-            title={signups.length < 4 ? "Need at least 4 players" : undefined}
+            disabled={generating || regulars.length < 4}
+            title={regulars.length < 4 ? "Need at least 4 players" : undefined}
             className="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-40 disabled:cursor-not-allowed text-yellow-900 font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
           >
             {generating
@@ -163,11 +216,14 @@ export default function AdminSessionPage() {
           </div>
         )}
 
-        {signups.length < 4 && (
+        {regulars.length < 4 && (
           <p className="text-gray-400 text-sm">
-            Need at least 4 players to generate doubles pairings. Currently{" "}
-            {signups.length === 0 ? "no one has" : `only ${signups.length} player${signups.length !== 1 ? "s have" : " has"}`}{" "}
-            signed up.
+            Need at least 4 players to generate doubles pairings — alternates
+            aren&apos;t counted. Currently{" "}
+            {regulars.length === 0
+              ? "no one has"
+              : `only ${regulars.length} player${regulars.length !== 1 ? "s have" : " has"}`}{" "}
+            signed up to play.
           </p>
         )}
 
@@ -210,35 +266,25 @@ export default function AdminSessionPage() {
       {/* Signups */}
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
         <h2 className="text-lg font-bold text-gray-800 mb-4">
-          Signups ({signups.length} / {session.max_players})
+          Playing ({regulars.length} / {seats})
         </h2>
-        {signups.length === 0 ? (
-          <p className="text-gray-400 text-sm">No signups yet.</p>
+        {regulars.length === 0 ? (
+          <p className="text-gray-400 text-sm">No one signed up to play yet.</p>
         ) : (
           <ul className="divide-y divide-gray-100">
-            {signups.map((s, i) => (
-              <li key={s.id} className="flex items-center gap-3 py-3">
-                <span className="text-gray-400 text-sm w-6 text-right shrink-0">{i + 1}.</span>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900">{s.player.name}</div>
-                  {s.player.phone && (
-                    <div className="text-gray-400 text-xs">{s.player.phone}</div>
-                  )}
-                </div>
-                <div className="text-gray-400 text-xs shrink-0">
-                  {new Date(s.signed_up_at + "Z").toLocaleDateString()}
-                </div>
-                <button
-                  onClick={() => handleRemoveSignup(s.id)}
-                  disabled={removingId === s.id}
-                  className="shrink-0 text-red-400 hover:text-red-600 disabled:opacity-40 text-sm transition-colors px-2"
-                  title="Remove player"
-                >
-                  {removingId === s.id ? "…" : "✕"}
-                </button>
-              </li>
-            ))}
+            {regulars.map((s, i) => signupRow(s, i))}
           </ul>
+        )}
+
+        {alternates.length > 0 && (
+          <>
+            <h3 className="text-sm font-bold text-gray-600 mt-6 mb-2">
+              Alternates ({alternates.length})
+            </h3>
+            <ul className="divide-y divide-gray-100">
+              {alternates.map((s, i) => signupRow(s, i))}
+            </ul>
+          </>
         )}
 
         <div className="mt-4 pt-4 border-t border-gray-100">

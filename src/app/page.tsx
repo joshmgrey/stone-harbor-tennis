@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { capacity } from "@/lib/session";
 import type { Session } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +10,11 @@ export const dynamic = "force-dynamic";
 async function getSessions(): Promise<Session[]> {
   const sessions = await prisma.session.findMany({
     orderBy: [{ date: "asc" }, { start_time: "asc" }],
-    include: { _count: { select: { signups: true } } },
+    include: {
+      _count: { select: { signups: { where: { is_alternate: false } } } },
+    },
   });
-  return sessions.map(({ _count, created_at, ...rest }) => ({
+  return sessions.map(({ _count, created_at, max_players: _mp, ...rest }) => ({
     ...rest,
     created_at: created_at.toISOString(),
     signup_count: _count.signups,
@@ -100,7 +103,8 @@ export default async function HomePage() {
 }
 
 function SessionCard({ session: s, past }: { session: Session; past?: boolean }) {
-  const spotsLeft = s.max_players - (s.signup_count ?? 0);
+  const seats = capacity(s);
+  const spotsLeft = seats - (s.signup_count ?? 0);
   const full = spotsLeft <= 0;
 
   return (
@@ -138,7 +142,7 @@ function SessionCard({ session: s, past }: { session: Session; past?: boolean })
             </div>
           )}
           <div className="text-xs text-gray-400 mt-1">
-            {s.signup_count ?? 0} / {s.max_players}
+            {s.signup_count ?? 0} / {seats}
           </div>
         </div>
       </div>

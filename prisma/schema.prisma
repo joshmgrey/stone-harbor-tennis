@@ -7,17 +7,20 @@ datasource db {
 }
 
 model Session {
-  id          Int       @id @default(autoincrement())
-  date        String
-  start_time  String
-  end_time    String
-  location    String    @default("Stone Harbor Tennis Courts")
-  courts      Int       @default(2)
-  max_players Int       @default(16)
-  notes       String?
-  created_at  DateTime  @default(now())
-  signups     Signup[]
-  pairings    Pairing[]
+  id         Int       @id @default(autoincrement())
+  date       String
+  start_time String
+  end_time   String
+  location   String    @default("Stone Harbor Tennis Courts")
+  courts     Int       @default(2)
+  // Capacity is derived: courts * PLAYERS_PER_COURT (see src/lib/session.ts).
+  // `max_players` is retained only so old rows/queries don't break; nothing
+  // reads it. Drop it in a later migration.
+  max_players Int      @default(16)
+  notes      String?
+  created_at DateTime  @default(now())
+  signups    Signup[]
+  pairings   Pairing[]
 
   @@map("sessions")
 }
@@ -26,6 +29,8 @@ model Signup {
   id           Int      @id @default(autoincrement())
   session_id   Int
   player_id    Int
+  // Alternates don't count toward capacity and aren't included in pairings.
+  is_alternate Boolean  @default(false)
   signed_up_at DateTime @default(now())
   session      Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
   player       Player   @relation(fields: [player_id], references: [id])

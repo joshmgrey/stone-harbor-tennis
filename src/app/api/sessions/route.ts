@@ -1,25 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/auth";
+import { PLAYERS_PER_COURT } from "@/lib/session";
+
+const regularCount = {
+  _count: { select: { signups: { where: { is_alternate: false } } } },
+} as const;
+
+type WithCount = { _count: { signups: number }; max_players?: number };
+function shape<T extends WithCount>(s: T) {
+  const { _count, max_players: _drop, ...rest } = s;
+  return { ...rest, signup_count: _count.signups };
+}
 
 export async function GET() {
   const sessions = await prisma.session.findMany({
     orderBy: [{ date: "asc" }, { start_time: "asc" }],
-    include: { _count: { select: { signups: true } } },
+    include: regularCount,
   });
-  return NextResponse.json(
-    sessions.map((s) => {
-      const { _count, ...rest } = s;
-      return { ...rest, signup_count: _count.signups };
-    })
-  );
+  return NextResponse.json(sessions.map(shape));
 }
 
 export async function POST(req: NextRequest) {
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { date, start_time, end_time, location, courts, max_players, notes } =
+  const { date, start_time, end_time, location, courts, notes } =
     await req.json();
 
   if (!date || !start_time || !end_time) {
@@ -29,19 +35,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const courtCount = courts ?? 2;
+
   const session = await prisma.session.create({
     data: {
       date,
       start_time,
       end_time,
       location: location ?? "Stone Harbor Tennis Courts",
-      courts: courts ?? 2,
-      max_players: max_players ?? 16,
+      courts: courtCount,
+      // Derived; retained only for the deprecated column.
+      max_players: courtCount * PLAYERS_PER_COURT,
       notes: notes ?? null,
     },
-    include: { _count: { select: { signups: true } } },
+    include: regularCount,
   });
 
-  const { _count, ...rest } = session;
-  return NextResponse.json({ ...rest, signup_count: _count.signups }, { status: 201 });
+  return NextResponse.json(shape(session), { status: 201 });
 }
