@@ -1,0 +1,78 @@
+name: docker-build
+
+# Builds the container image on GitHub's runners — the local dev machine has
+# no virtualization for Docker. No push, no AWS: this only proves the
+# Dockerfile builds and the container serves. The deploy pipeline is B2.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "package*.json"
+      - "next.config.ts"
+      - "prisma/**"
+      - "src/**"
+      - "public/**"
+      - ".github/workflows/docker-build.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "package*.json"
+      - "next.config.ts"
+      - "prisma/**"
+      - "src/**"
+      - "public/**"
+      - ".github/workflows/docker-build.yml"
+
+permissions:
+  contents: read
+  actions: write # gha build cache
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build runner image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          load: true
+          tags: sht-app:ci
+          build-args: |
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build migrator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrator
+          load: true
+          tags: sht-migrate:ci
+          cache-from: type=gha
+
+      - name: Smoke-test the runner image
+        run: |
+          docker run -d --name sht --network host \
+            -e NODE_ENV=production \
+            -e AUTH_SECRET=ci \
+            -e DATABASE_URL='postgresql://u:p@127.0.0.1:5432/none?sslmode=disable' \
+            sht-app:ci
+          ok=
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then ok=1; break; fi
+            sleep 1
+          done
+          echo "--- container logs ---"
+          docker logs sht
+          docker rm -f sht
+          test -n "$ok"
