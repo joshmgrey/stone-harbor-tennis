@@ -296,59 +296,49 @@ export class DatabaseStack extends cdk.Stack {
 
 /*
  * ---------------------------------------------------------------------------
- * READING THE LIVE VALUES  (fill the props from this)
+ * CONTEXT  (infra/cdk.context.json — gitignored; this repo is public)
  * ---------------------------------------------------------------------------
+ * The db:* / env:* values below were read from the live "tennis" instance in
+ * us-east-2. To re-derive them:
  *
- *   ID=<your-db-instance-id>
- *
- *   aws rds describe-db-instances --db-instance-identifier "$ID" \
- *     --query 'DBInstances[0].{
- *        engine:EngineVersion,
- *        storage:AllocatedStorage,
- *        storageType:StorageType,
- *        encrypted:StorageEncrypted,
- *        multiAz:MultiAZ,
- *        public:PubliclyAccessible,
- *        backupDays:BackupRetentionPeriod,
+ *   aws rds describe-db-instances --db-instance-identifier tennis \
+ *     --region us-east-2 --query 'DBInstances[0].{
+ *        engine:EngineVersion, storage:AllocatedStorage,
+ *        maxStorage:MaxAllocatedStorage, storageType:StorageType,
+ *        encrypted:StorageEncrypted, kmsKey:KmsKeyId, multiAz:MultiAZ,
+ *        public:PubliclyAccessible, backupDays:BackupRetentionPeriod,
  *        deleteProtection:DeletionProtection,
  *        subnetGroup:DBSubnetGroup.DBSubnetGroupName,
  *        vpc:DBSubnetGroup.VpcId,
  *        sgs:VpcSecurityGroups[].VpcSecurityGroupId,
- *        masterUser:MasterUsername,
- *        dbName:DBName,
- *        instanceClass:DBInstanceClass
- *     }'
+ *        masterUser:MasterUsername, dbName:DBName, class:DBInstanceClass }'
  *
- *   -> masterUser  goes to  db:masterUsername
- *   -> dbName      goes to  db:databaseName  ONLY if non-null; if it prints
- *                  `null` / is absent, leave db:databaseName unset.
+ *   dbName printed "-" / null  ->  leave db:databaseName unset.
  *
- * Create the credentials secret from the password you already have:
+ * Create the credentials secret from the password already in Amplify's
+ * DATABASE_URL, then put its ARN in db:masterSecretArn:
  *
- *   aws secretsmanager create-secret \
+ *   aws secretsmanager create-secret --region us-east-2 \
  *     --name stone-harbor-tennis/rds/master \
  *     --secret-string '{"password":"<CURRENT PASSWORD>"}'
  *
  * ---------------------------------------------------------------------------
  * IMPORT SEQUENCE
  * ---------------------------------------------------------------------------
- *   1. cdk bootstrap                      (once per account/region)
- *   2. cdk synth DatabaseStack            (must synth with concrete env)
- *   3. cdk import DatabaseStack           feed it the DBInstanceIdentifier.
- *                                        The template has ONE resource
- *                                        (AWS::RDS::DBInstance), which is
- *                                        importable, so this succeeds.
- *   4. cdk diff DatabaseStack             MUST be empty — no added/removed
- *                                        resources, no property changes. Any
- *                                        diff means a context value is wrong;
- *                                        fix it, do NOT deploy. (A diff on a
- *                                        create-only prop — DBName,
- *                                        MasterUsername, engine, storage
- *                                        encryption — means a deploy would
- *                                        REPLACE the instance.)
- *   5. commit cdk.context.json
+ *   1. cdk bootstrap aws://<account>/us-east-2      (once)
+ *   2. cdk synth DatabaseStack
+ *   3. cdk import DatabaseStack     feed it the identifier "tennis". The
+ *                                  template is ONE importable resource
+ *                                  (AWS::RDS::DBInstance), so this succeeds.
+ *   4. cdk diff DatabaseStack       MUST be empty — no added/removed
+ *                                  resources, no property changes. Any diff
+ *                                  means a context value is wrong; fix it, do
+ *                                  NOT deploy. A diff on a create-only prop
+ *                                  (DBName, MasterUsername, engine version,
+ *                                  StorageEncrypted, KmsKeyId, instance class)
+ *                                  means a deploy would REPLACE the instance.
  *
- * Only once step 4 is clean do you start changing things (turn on
- * deletionProtection, wire the SecretTargetAttachment, then Path B).
+ * Only once step 4 is clean do you change anything (wire the
+ * SecretTargetAttachment, then Path B / dedicated VPC).
  * ---------------------------------------------------------------------------
  */

@@ -7,8 +7,8 @@ const app = new cdk.App();
 /**
  * Every DatabaseStack prop must byte-for-byte match the live instance for
  * `cdk import` to be a no-op, so nothing here has a default. Values come from
- * cdk.json `context` (or `-c key=value` on the CLI). Read them off the live
- * instance first:
+ * `cdk.context.json` (gitignored — this repo is public) or `-c key=value` on
+ * the CLI. Read them off the live instance first:
  *
  *   aws rds describe-db-instances --db-instance-identifier <ID> \
  *     --query 'DBInstances[0].{engine:EngineVersion,storage:AllocatedStorage,
@@ -22,8 +22,8 @@ function req(key: string): string {
   const value = app.node.tryGetContext(key);
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(
-      `Missing required context "${key}". Set it in infra/cdk.json under ` +
-        `"context", or pass -c ${key}=<value> on the command line.`,
+      `Missing required context "${key}". Add it to infra/cdk.context.json ` +
+        `(gitignored), or pass -c ${key}=<value> on the command line.`,
     );
   }
   return value;
