@@ -159,24 +159,27 @@ export class AppStack extends cdk.Stack {
     this.serviceSecurityGroupId =
       service.service.connections.securityGroups[0].securityGroupId;
 
-    // B3 — the cutover. Point the apex and www at the ALB, replacing the
-    // records Amplify created. `deleteExisting` removes the old record right
-    // before creating the new one (a custom resource), keeping the gap to
-    // seconds. Amplify stays deployed: rollback is recreating these two
-    // records against its target (note the current values first).
+    // B3 — the cutover. Point the apex and www at the ALB.
+    //
+    // `deleteExisting` removes the record Amplify created right before the new
+    // one (a custom resource), keeping the gap to seconds. It only matches the
+    // SAME record type, though: Amplify's apex is an A-alias (fine), but www
+    // is a CNAME — an A record there would collide, so www stays a CNAME
+    // (pointing at the ALB's own DNS name) and `deleteExisting` can clear it.
     const albTarget = route53.RecordTarget.fromAlias(
       new route53Targets.LoadBalancerTarget(service.loadBalancer),
     );
     new route53.ARecord(this, "ApexRecord", {
       zone,
-      // no recordName -> the zone apex
+      // no recordName -> the zone apex; an apex cannot be a CNAME, so alias
       target: albTarget,
       deleteExisting: true,
     });
-    new route53.ARecord(this, "WwwRecord", {
+    new route53.CnameRecord(this, "WwwRecord", {
       zone,
       recordName: wwwDomain,
-      target: albTarget,
+      domainName: service.loadBalancer.loadBalancerDnsName,
+      ttl: cdk.Duration.minutes(5),
       deleteExisting: true,
     });
 
