@@ -165,9 +165,8 @@ Variables:
 |---|---|
 | `AWS_ACCOUNT_ID` | `462096274792` |
 | `AWS_DEPLOY_ROLE_ARN` | the `DeployRoleArn` from B0 |
-| `APP_DOMAIN` | the hostname users use today (apex or www) |
-| `HOSTED_ZONE_ID` | Route 53 zone id |
-| `ZONE_NAME` | Route 53 zone name |
+| `HOSTED_ZONE_ID` | `Z0122083131AK1IA1P4HI` |
+| `ZONE_NAME` | `stone-harbor-invitational-tennis.org` |
 | `DATABASE_URL_SECRET_ARN` | ARN from step 1 |
 | `AUTH_SECRET_ARN` | ARN from step 1 |
 
@@ -183,19 +182,20 @@ Merging B2 to `main` runs `.github/workflows/deploy.yml`: `prisma migrate
 deploy` (DB still public) → `cdk deploy AppStack` (builds the image, creates
 the ALB + service). Or trigger it manually with **Run workflow**.
 
-The ACM cert (DNS-validated) covers `APP_DOMAIN` **and** `new.<ZONE_NAME>`.
-Only `new.<ZONE_NAME>` gets a Route 53 record now — that's the B2/B3 test
-URL. Verify the whole app there (`https://new.<zone>`): admin login,
-sign-ups, pairings, calendar feed. It's talking to the **same** database as
-the live Amplify site.
+The ACM cert (DNS-validated) covers the apex, `www.`, **and**
+`new.<ZONE_NAME>`. Only `new.<ZONE_NAME>` gets a Route 53 record now — that's
+the B2/B3 test URL. Verify the whole app at
+`https://new.stone-harbor-invitational-tennis.org`: admin login, sign-ups,
+pairings, calendar feed. It's talking to the **same** database as the live
+Amplify site.
 
 `AppStack` deploys from CI only — the image is a Docker asset and needs
 Docker. `cdk synth`/`diff` for it work anywhere.
 
 ## B3 — cut users over
 
-Add the apex/www record → the ALB, in `AppStack`. Lower the DNS TTL a day
-ahead. Amplify stays deployed as the rollback.
+Add the apex + `www.` alias records → the ALB, in `AppStack`. Lower the DNS
+TTL a day ahead. Amplify stays deployed as the rollback.
 
 ## B4 — database private
 

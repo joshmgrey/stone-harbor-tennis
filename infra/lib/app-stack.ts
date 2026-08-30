@@ -15,16 +15,12 @@ export interface AppStackProps extends cdk.StackProps {
   /** The default VPC — the app and the database share it (no new VPC). */
   readonly vpcId: string;
 
-  /** Route 53 hosted zone that owns the domain. */
+  /**
+   * Route 53 hosted zone that owns the domain. The cert covers the apex,
+   * `www.`, and `new.` (the B2/B3 test host) so B3 is just adding records.
+   */
   readonly hostedZoneId: string;
   readonly zoneName: string;
-
-  /**
-   * The hostname users currently reach the site on (apex or www). The cert
-   * covers this so B3 is just adding the record — B2 only wires up
-   * `new.<zone>` for testing.
-   */
-  readonly primaryDomain: string;
 
   /** NEXT_PUBLIC_ — inlined into the client bundle when the image is built. */
   readonly googleMapsApiKey: string;
@@ -60,12 +56,13 @@ export class AppStack extends cdk.Stack {
       zoneName: props.zoneName,
     });
 
-    // Test hostname for B2/B3. The real cutover (apex/www record) is B3.
+    const wwwDomain = `www.${props.zoneName}`;
+    // Test hostname for B2/B3. The real cutover (apex + www records) is B3.
     const stagingDomain = `new.${props.zoneName}`;
 
     const certificate = new acm.Certificate(this, "Cert", {
-      domainName: props.primaryDomain,
-      subjectAlternativeNames: [stagingDomain],
+      domainName: props.zoneName,
+      subjectAlternativeNames: [wwwDomain, stagingDomain],
       validation: acm.CertificateValidation.fromDns(zone),
     });
 
@@ -165,6 +162,7 @@ export class AppStack extends cdk.Stack {
       value: `https://${stagingDomain}`,
       description: "B2 test URL — verify the app here before the B3 DNS flip",
     });
+    new cdk.CfnOutput(this, "WwwDomain", { value: wwwDomain });
     new cdk.CfnOutput(this, "AlbDnsName", {
       value: service.loadBalancer.loadBalancerDnsName,
     });

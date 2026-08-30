@@ -103,12 +103,11 @@ new GitHubDeployStack(app, "GitHubDeployStack", {
 // Path B / B2 — the app on Fargate. Only appears in the app tree once its
 // context is set (it builds a Docker image asset, so `cdk` for the other
 // stacks stays usable on a machine without Docker until you opt in).
-if (opt("app:domainName")) {
+if (opt("app:zoneName")) {
   new AppStack(app, "AppStack", {
     env,
     description: "Path B: Next.js app on ECS Fargate + ALB in the default VPC",
     vpcId: req("db:vpcId"),
-    primaryDomain: req("app:domainName"),
     hostedZoneId: req("app:hostedZoneId"),
     zoneName: req("app:zoneName"),
     googleMapsApiKey: opt("app:googleMapsApiKey") ?? "",

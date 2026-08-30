@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     # Skip cleanly until B2 config is in place (see infra/README.md).
-    if: vars.APP_DOMAIN != ''
+    if: vars.ZONE_NAME != ''
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +67,6 @@ jobs:
           npx cdk deploy AppStack --require-approval never \
             -c env:account='${{ vars.AWS_ACCOUNT_ID }}' \
             -c env:region=us-east-2 \
-            -c app:domainName='${{ vars.APP_DOMAIN }}' \
             -c app:hostedZoneId='${{ vars.HOSTED_ZONE_ID }}' \
             -c app:zoneName='${{ vars.ZONE_NAME }}' \
             -c app:googleMapsApiKey='${{ secrets.GOOGLE_MAPS_API_KEY }}' \
