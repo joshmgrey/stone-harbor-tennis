@@ -135,7 +135,8 @@ export class DatabaseStack extends cdk.Stack {
     // nothing — B5 deletes it.
     const dbSecurityGroup = new ec2.SecurityGroup(this, "DbSecurityGroup", {
       vpc,
-      description: "stone-harbor-tennis RDS — 5432 from the Fargate service only",
+      description:
+        "stone-harbor-tennis RDS - 5432 from the Fargate service only",
       allowAllOutbound: true,
     });
     dbSecurityGroup.addIngressRule(
@@ -293,7 +294,7 @@ export class DatabaseStack extends cdk.Stack {
     new cdk.CfnOutput(this, "DbMasterSecretArn", {
       value: this.credentialsSecret.secretArn,
       description:
-        "Secrets Manager ARN — password + (after deploy) host/port/dbname",
+        "Secrets Manager ARN - password + (after deploy) host/port/dbname",
     });
   }
 }
