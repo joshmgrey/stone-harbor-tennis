@@ -8,6 +8,7 @@ import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as route53 from "aws-cdk-lib/aws-route53";
+import * as route53Targets from "aws-cdk-lib/aws-route53-targets";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as logs from "aws-cdk-lib/aws-logs";
 
@@ -158,11 +159,33 @@ export class AppStack extends cdk.Stack {
     this.serviceSecurityGroupId =
       service.service.connections.securityGroups[0].securityGroupId;
 
+    // B3 — the cutover. Point the apex and www at the ALB, replacing the
+    // records Amplify created. `deleteExisting` removes the old record right
+    // before creating the new one (a custom resource), keeping the gap to
+    // seconds. Amplify stays deployed: rollback is recreating these two
+    // records against its target (note the current values first).
+    const albTarget = route53.RecordTarget.fromAlias(
+      new route53Targets.LoadBalancerTarget(service.loadBalancer),
+    );
+    new route53.ARecord(this, "ApexRecord", {
+      zone,
+      // no recordName -> the zone apex
+      target: albTarget,
+      deleteExisting: true,
+    });
+    new route53.ARecord(this, "WwwRecord", {
+      zone,
+      recordName: wwwDomain,
+      target: albTarget,
+      deleteExisting: true,
+    });
+
+    new cdk.CfnOutput(this, "SiteUrl", {
+      value: `https://${props.zoneName}`,
+    });
     new cdk.CfnOutput(this, "StagingUrl", {
       value: `https://${stagingDomain}`,
-      description: "B2 test URL — verify the app here before the B3 DNS flip",
     });
-    new cdk.CfnOutput(this, "WwwDomain", { value: wwwDomain });
     new cdk.CfnOutput(this, "AlbDnsName", {
       value: service.loadBalancer.loadBalancerDnsName,
     });
