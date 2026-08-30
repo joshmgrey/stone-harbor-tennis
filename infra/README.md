@@ -239,11 +239,26 @@ longer used — B5 deletes it.
 ### Migrations, from here on
 
 `.github/workflows/migrate.yml` (**Actions → migrate → Run workflow**) runs
-`prisma migrate deploy` as a one-off Fargate task in the VPC. Run it by hand
-when a merged change ships a new migration — after `deploy.yml` for that
-commit, before the schema change matters. Your laptop can no longer reach the
-DB directly; for `psql` / `prisma studio` you'd tunnel through a bastion
-(not set up — add if you need it).
+`prisma migrate deploy` as a one-off Fargate task in the VPC.
+
+**`migrate.yml` uses the migrator task definition from AppStack's current
+outputs** — i.e. the image from the last completed `cdk deploy`. So:
+
+- **Run it only AFTER `deploy.yml` for that commit has finished.** Run it
+  during the deploy and it runs the *old* migrator image → "no pending
+  migrations" → nothing happens.
+- **If new code depends on the new column, split the change into two PRs:**
+  1. PR A — the migration only (`schema.prisma` + `prisma/migrations/...`).
+     Merge → wait for `deploy.yml` → run `migrate.yml`. The running app
+     selects explicit columns, so an added column is invisible to it — no
+     errors during the gap.
+  2. PR B — the code that uses the new column. Merge → deploy.
+
+  Ship both together and there's a window (~10 min) where the new app is
+  live but the migration hasn't run and DB pages 500.
+
+Your laptop can't reach the DB directly; for `psql` / `prisma studio` you'd
+tunnel through a bastion (not set up — add if you need it).
 
 ## B5 — decommission
 
