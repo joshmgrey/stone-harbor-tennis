@@ -3,7 +3,7 @@
 # Next.js 16 standalone build. Prisma 7 runs through the pg driver adapter,
 # so there is no Rust query engine to match to the base image at runtime.
 
-ARG NODE_IMAGE=node:22-alpine
+ARG NODE_IMAGE=node:24-alpine
 
 # ---- deps: install everything needed to build ----------------------------
 FROM ${NODE_IMAGE} AS deps

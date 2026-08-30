@@ -39,11 +39,11 @@ jobs:
     # Skip cleanly until B2 config is in place (see infra/README.md).
     if: vars.DATABASE_URL_SECRET_ARN != ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: infra/package-lock.json
 
