@@ -153,28 +153,23 @@ export class DatabaseStack extends cdk.Stack {
     // ---------------------------------------------------------------------
     // 4. Master credentials
     // ---------------------------------------------------------------------
-    // The live instance was created with a password typed into the console
-    // and pasted into `DATABASE_URL` (README step 4). `MasterUserPassword`
-    // is a write-only property: CloudFormation import ignores it, and a
-    // later deploy only touches it if the rendered value *changes*.
+    // Secrets Manager holds the master password (the same one that's in the
+    // Amplify `DATABASE_URL`). The secret was created by hand as
+    // `{ "password": "..." }` — no `username` key — so the username is passed
+    // explicitly below.
     //
-    // We import the secret purely so the stack can expose it (below) and an
-    // app stack can grant read on it. We deliberately DO NOT pass it to
-    // `Credentials.fromSecret()` — that helper always emits an
-    // `AWS::SecretsManager::SecretTargetAttachment`, and that resource type
-    // is NOT importable. `cdk import` builds one IMPORT change set from the
-    // whole synthesized template, so a non-importable new resource makes the
-    // import fail before the instance is ever adopted. Instead we feed the
-    // password straight in as a dynamic reference via `fromPassword` — the
-    // rendered template then contains exactly one resource, the importable
-    // `AWS::RDS::DBInstance`.
+    // HISTORY: for the initial `cdk import` this stack used
+    // `Credentials.fromPassword` and fed the password in as a dynamic
+    // reference, because `Credentials.fromSecret` emits an
+    // `AWS::SecretsManager::SecretTargetAttachment` and that resource type is
+    // not importable — it would have broken the single IMPORT change set.
     //
-    // (Post-import hardening step: switch to `Credentials.fromSecret()` or add
-    //  an explicit `SecretTargetAttachment` via `cdk deploy` so the secret
-    //  also carries host/port/dbname for the app stack to consume.)
-    //
-    // DIVERGENCE: today there is NO secret — the password lives only in the
-    // Amplify env var. This introduces Secrets Manager as the source of truth.
+    // Now that the instance is imported, `fromSecret` is safe: the attachment
+    // is added by a normal `cdk deploy`. `MasterUsername` / `MasterUserPassword`
+    // render identically to before (same secret, same `password` field), so
+    // the only change is the new attachment resource — no instance change.
+    // The attachment also merges host / port / dbname / engine into the
+    // secret so a future app stack can build the connection from one secret.
     const credentialsSecret = secretsmanager.Secret.fromSecretCompleteArn(
       this,
       "DbMasterSecret",
@@ -212,14 +207,12 @@ export class DatabaseStack extends cdk.Stack {
       // enforced app-side via the `pg` adapter (`src/lib/prisma.ts`).
       publiclyAccessible: true,
 
-      // `MasterUsername` (create-only) comes from context; the password is a
-      // `{{resolve:secretsmanager:...}}` dynamic reference — never rendered
-      // in plaintext, and ignored by `cdk import` as a write-only property.
-      credentials: rds.Credentials.fromPassword(
+      // `MasterUsername` (create-only) comes from context. `fromSecret` also
+      // creates the SecretTargetAttachment linking this secret to the
+      // instance (see the comment in section 4).
+      credentials: rds.Credentials.fromSecret(
+        credentialsSecret,
         props.masterUsername,
-        cdk.SecretValue.secretsManager(props.masterCredentialsSecretArn, {
-          jsonField: "password",
-        }),
       ),
 
       // `DBName` is CREATE-ONLY. Only set it if the live instance actually has
@@ -273,7 +266,9 @@ export class DatabaseStack extends cdk.Stack {
     });
 
     this.instance = instance;
-    this.credentialsSecret = credentialsSecret;
+    // `instance.secret` is the attached secret (original ARN + merged
+    // connection fields); fall back to the plain import if somehow unset.
+    this.credentialsSecret = instance.secret ?? credentialsSecret;
 
     // ---------------------------------------------------------------------
     // 6. Outputs
@@ -288,8 +283,9 @@ export class DatabaseStack extends cdk.Stack {
       value: instance.dbInstanceEndpointPort,
     });
     new cdk.CfnOutput(this, "DbMasterSecretArn", {
-      value: credentialsSecret.secretArn,
-      description: "Secrets Manager ARN holding master username/password",
+      value: this.credentialsSecret.secretArn,
+      description:
+        "Secrets Manager ARN — password + (after deploy) host/port/dbname",
     });
   }
 }
