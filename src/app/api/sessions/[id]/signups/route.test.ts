@@ -5,14 +5,26 @@ const findUnique = vi.fn();
 const upsert = vi.fn();
 const findFirst = vi.fn();
 const create = vi.fn();
+const count = vi.fn();
+const queryRaw = vi.fn();
+
+// The signup route now does its capacity check + insert inside an interactive
+// `prisma.$transaction(async (tx) => ...)`; the transaction client `tx` exposes
+// the same surface the callback touches.
+const tx = {
+  $queryRaw: (...a: unknown[]) => queryRaw(...a),
+  signup: {
+    count: (a: unknown) => count(a),
+    create: (a: unknown) => create(a),
+  },
+};
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     session: { findUnique: (a: unknown) => findUnique(a) },
     player: { upsert: (a: unknown) => upsert(a) },
-    signup: {
-      findFirst: (a: unknown) => findFirst(a),
-      create: (a: unknown) => create(a),
-    },
+    signup: { findFirst: (a: unknown) => findFirst(a) },
+    $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
   },
 }));
 
@@ -27,23 +39,22 @@ const jsonRequest = (body: unknown) =>
     body: JSON.stringify(body),
   }) as unknown as NextRequest;
 
-// A 2-court session (capacity 8) with `count` regulars already signed up.
-const sessionWith = (count: number) => ({
-  id: 1,
-  courts: 2,
-  _count: { signups: count },
-});
+// A 2-court session (capacity 8). Set the regular-signup count separately with
+// `count.mockResolvedValue(...)`.
+const session = { id: 1, courts: 2 };
 
 beforeEach(() => {
-  findUnique.mockReset();
+  findUnique.mockReset().mockResolvedValue(session);
   upsert.mockReset().mockResolvedValue({ id: 10 });
   findFirst.mockReset().mockResolvedValue(null);
   create.mockReset().mockImplementation((a) => ({ id: 99, ...a.data }));
+  count.mockReset().mockResolvedValue(0);
+  queryRaw.mockReset().mockResolvedValue([]);
 });
 
 describe("POST /api/sessions/:id/signups", () => {
   it("creates a signup on the happy path and returns 201", async () => {
-    findUnique.mockResolvedValue(sessionWith(3));
+    count.mockResolvedValue(3);
 
     const res = await POST(jsonRequest({ name: "Alice", phone: "555-1212" }), ctx("1"));
     expect(res.status).toBe(201);
@@ -58,9 +69,19 @@ describe("POST /api/sessions/:id/signups", () => {
     );
   });
 
-  it("trims the name and normalizes a blank phone to null", async () => {
-    findUnique.mockResolvedValue(sessionWith(0));
+  it("locks the session row before checking capacity", async () => {
+    count.mockResolvedValue(3);
 
+    await POST(jsonRequest({ name: "Alice" }), ctx("1"));
+
+    expect(queryRaw).toHaveBeenCalled();
+    const invocationOrder = (fn: ReturnType<typeof vi.fn>) =>
+      fn.mock.invocationCallOrder[0];
+    expect(invocationOrder(queryRaw)).toBeLessThan(invocationOrder(count));
+    expect(invocationOrder(count)).toBeLessThan(invocationOrder(create));
+  });
+
+  it("trims the name and normalizes a blank phone to null", async () => {
     await POST(jsonRequest({ name: "  Bob  ", phone: "   " }), ctx("1"));
 
     expect(upsert).toHaveBeenCalledWith(
@@ -87,7 +108,6 @@ describe("POST /api/sessions/:id/signups", () => {
   });
 
   it("returns 409 when the player is already signed up to play", async () => {
-    findUnique.mockResolvedValue(sessionWith(3));
     findFirst.mockResolvedValue({ id: 5, is_alternate: false });
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
@@ -99,7 +119,6 @@ describe("POST /api/sessions/:id/signups", () => {
   });
 
   it("returns 409 with the alternate-list message on a duplicate alternate signup", async () => {
-    findUnique.mockResolvedValue(sessionWith(3));
     findFirst.mockResolvedValue({ id: 6, is_alternate: true });
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
@@ -108,7 +127,7 @@ describe("POST /api/sessions/:id/signups", () => {
   });
 
   it("returns 409 when the session is full and the player is not joining as an alternate", async () => {
-    findUnique.mockResolvedValue(sessionWith(8)); // capacity is 8
+    count.mockResolvedValue(8); // capacity is 8
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(409);
@@ -117,7 +136,7 @@ describe("POST /api/sessions/:id/signups", () => {
   });
 
   it("lets a player join a full session as an alternate", async () => {
-    findUnique.mockResolvedValue(sessionWith(8));
+    count.mockResolvedValue(8);
 
     const res = await POST(
       jsonRequest({ name: "Alice", is_alternate: true }),
