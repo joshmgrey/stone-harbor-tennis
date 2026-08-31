@@ -67,3 +67,51 @@ jobs:
             -c app:googleMapsApiKey='${{ secrets.GOOGLE_MAPS_API_KEY }}' \
             -c app:databaseUrlSecretArn='${{ vars.DATABASE_URL_SECRET_ARN }}' \
             -c app:authSecretArn='${{ vars.AUTH_SECRET_ARN }}'
+
+      # Black-box check that the new revision is actually serving on the public
+      # domain — DNS -> ALB -> task, from outside AWS. ECS already gates the
+      # rollout on the `/api/health` target-group check and rolls back a task
+      # that never goes healthy (circuit breaker), so a failure here means the
+      # deploy "succeeded" but the site is wrong: bad DNS, cert, ALB rule, or a
+      # route that 500s on a dependency the health check doesn't touch. Red =
+      # look now.
+      - name: Post-deploy smoke test
+        run: |
+          set -euo pipefail
+
+          url=$(aws cloudformation describe-stacks --stack-name AppStack \
+            --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" \
+            --output text)
+          echo "smoke-testing $url"
+
+          # Poll: a fresh task can take a bit to pass health checks and enter
+          # the target group. ~5 min budget.
+          probe() {
+            path="$1"; want="$2"
+            for i in $(seq 1 20); do
+              code=$(curl -sS -o /tmp/smoke-body -w '%{http_code}' \
+                --max-time 10 "$url$path" || echo 000)
+              if [ "$code" = "$want" ]; then
+                echo "ok    $path -> $code"
+                return 0
+              fi
+              echo "wait  $path -> $code (attempt $i/20)"
+              sleep 15
+            done
+            echo "::error::$url$path returned $code, expected $want"
+            head -c 500 /tmp/smoke-body || true
+            return 1
+          }
+
+          # Liveness — must also return the expected body, not just any 200
+          # (e.g. an ALB fixed-response or a stale cached page).
+          probe /api/health 200
+          grep -q '"status":"ok"' /tmp/smoke-body \
+            || { echo "::error::unexpected /api/health body"; cat /tmp/smoke-body; exit 1; }
+
+          # Real routes: the DB-backed API and the rendered home page. These
+          # exercise RDS reachability and Next SSR, which /api/health does not.
+          probe /api/sessions 200
+          probe / 200
+
+          echo "smoke test passed"

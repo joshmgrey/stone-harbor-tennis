@@ -192,7 +192,7 @@ asset is fingerprinted, not built.
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, an `infra` job (CDK assertion tests), and a `coverage` job that uploads the HTML report as an artifact |
 | [`docker-build.yml`](.github/workflows/docker-build.yml) | PRs touching the image, deps, or `src/` | builds the runner + migrator images and smoke-tests `GET /api/health` against the running container |
-| [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)) |
+| [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)), then a post-deploy smoke test that polls the live domain — `/api/health` (body checked), `/api/sessions` (exercises RDS), and `/` (SSR) — and fails the run if the site isn't serving |
 | [`migrate.yml`](.github/workflows/migrate.yml) | manual | `prisma migrate deploy` as a one-off Fargate task |
 
 ### Branch protection
@@ -243,6 +243,6 @@ Secrets Manager, injected into the container by ECS (never in the task definitio
 
 ### Deploying
 
-- **App**: push to `main` → `.github/workflows/deploy.yml` builds the image and runs `cdk deploy AppStack`.
+- **App**: push to `main` → `.github/workflows/deploy.yml` builds the image, runs `cdk deploy AppStack`, then smoke-tests the live domain (`/api/health`, `/api/sessions`, `/`) and fails the run if the new revision isn't serving.
 - **Migrations**: **Actions → migrate → Run workflow** — runs `prisma migrate deploy` as a one-off Fargate task in the VPC (the DB isn't reachable from outside it).
 - **Database changes**: `cd infra && npx cdk deploy DatabaseStack` from a machine with AWS credentials.
