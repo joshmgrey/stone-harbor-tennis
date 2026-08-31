@@ -1,9 +1,9 @@
 name: ci
 
-# Fast feedback on every PR (and on main after merge): typecheck, lint, and
-# the Vitest unit suite. No AWS, no database — those live in docker-build.yml
-# (image + smoke test) and the deploy pipeline. Keep these green before making
-# them required checks on the branch.
+# Fast feedback on every PR (and on main after merge): typecheck, lint, the
+# app's Vitest unit suite, and the CDK assertion tests for infra/. No AWS, no
+# database — those live in docker-build.yml (image + smoke test) and the deploy
+# pipeline. Keep these green before making them required checks on the branch.
 
 on:
   pull_request:
@@ -39,6 +39,26 @@ jobs:
       - run: npx prisma generate
 
       - run: npm run ${{ matrix.task }}
+
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+        working-directory: infra
+
+      # CDK assertion tests: synth each stack and assert on the CloudFormation
+      # template. No AWS credentials — VPC lookups resolve to a dummy VPC and
+      # the Docker image asset is only fingerprinted, not built.
+      - run: npm test
+        working-directory: infra
 
   coverage:
     runs-on: ubuntu-latest
