@@ -13,6 +13,12 @@ infra
 *.md
 LICENSE
 
+# Tests never run in the image — the build only needs app source.
+vitest.config.mts
+vitest.setup.ts
+**/*.test.ts
+**/*.test.tsx
+
 .env
 .env.*
 !.env.example

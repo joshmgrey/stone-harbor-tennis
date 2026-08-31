@@ -1,0 +1,62 @@
+name: ci
+
+# Fast feedback on every PR (and on main after merge): typecheck, lint, and
+# the Vitest unit suite. No AWS, no database — those live in docker-build.yml
+# (image + smoke test) and the deploy pipeline. Keep these green before making
+# them required checks on the branch.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [typecheck, lint, test]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The Prisma client is generated into node_modules; typecheck and the
+      # route tests need its types.
+      - run: npx prisma generate
+
+      - run: npm run ${{ matrix.task }}
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run coverage
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14

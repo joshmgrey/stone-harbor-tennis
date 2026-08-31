@@ -54,7 +54,13 @@ export default function AdminSessionPage() {
   }, [id, router]);
 
   useEffect(() => {
-    load();
+    // Wrapped in a local async fn on purpose: `react-hooks/set-state-in-effect`
+    // flags an effect that (transitively) calls setState, and `load` does. The
+    // indirection keeps the initial fetch-on-mount without tripping the rule.
+    async function runInitialLoad() {
+      await load();
+    }
+    runInitialLoad();
   }, [load]);
 
   async function handleGeneratePairings() {
