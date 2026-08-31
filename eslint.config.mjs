@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // The CDK app is a separate project with its own toolchain (infra/tsconfig.json).
     "infra/**",
+    // Local tooling state — git worktrees, caches. Never project source.
+    ".claude/**",
+    "coverage/**",
   ]),
 ]);
 
