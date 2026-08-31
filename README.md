@@ -202,6 +202,15 @@ asset is fingerprinted, not built.
 **not** required — it's path-filtered, so on PRs that don't touch app code it
 never runs and a required-but-absent check would block the merge forever.
 
+The gate has been verified from both sides with throwaway PRs:
+
+- A PR whose checks were still pending reported `mergeStateStatus: BLOCKED`,
+  and `gh pr merge` was refused with *"the base branch policy prohibits the
+  merge"*. Once all required checks passed it went `CLEAN`.
+- A PR that flipped `multiAz` to `true` in `DatabaseStack` — a change one of
+  the CDK assertion tests guards — failed the `infra` check and stayed
+  `BLOCKED`; reverting the change cleared the check and unblocked the PR.
+
 ---
 
 ## Deployment (AWS)
