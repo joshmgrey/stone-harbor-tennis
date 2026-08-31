@@ -171,11 +171,26 @@ The Fisher-Yates shuffle and court-splitting logic lives in
 can be tested without a request or a database; the route handler just wires it
 to Prisma.
 
+### Infrastructure tests
+
+[`infra/`](infra/) has its own Vitest suite (`cd infra && npm test`) of CDK
+assertion tests — each stack is synthesized to a CloudFormation template and
+checked against the properties that matter:
+
+| Stack | Asserts, among other things |
+|---|---|
+| [`DatabaseStack`](infra/lib/database-stack.ts) | RDS instance is `PubliclyAccessible: false`, encrypted, deletion-protected, `RETAIN` on stack delete; its security group admits `5432` only from the app SG, never a CIDR |
+| [`AppStack`](infra/lib/app-stack.ts) | one Fargate task, circuit-breaker rollback, ALB HTTPS + HTTP→HTTPS redirect, `/api/health` target-group check, a separate migrator task running `prisma migrate deploy`, the outputs `migrate.yml` reads |
+| [`GitHubDeployStack`](infra/lib/github-deploy-stack.ts) | OIDC trust is scoped to this repo's `main` ref and `production` environment; the role can only assume the CDK bootstrap roles and read `stone-harbor-tennis/*` secrets |
+
+No AWS credentials — VPC lookups resolve to a dummy VPC and the Docker image
+asset is fingerprinted, not built.
+
 ### Pipeline
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, plus a `coverage` job that uploads the HTML report as an artifact |
+| [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, an `infra` job (CDK assertion tests), and a `coverage` job that uploads the HTML report as an artifact |
 | [`docker-build.yml`](.github/workflows/docker-build.yml) | PRs touching the image, deps, or `src/` | builds the runner + migrator images and smoke-tests `GET /api/health` against the running container |
 | [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)) |
 | [`migrate.yml`](.github/workflows/migrate.yml) | manual | `prisma migrate deploy` as a one-off Fargate task |
@@ -183,9 +198,9 @@ to Prisma.
 ### Branch protection
 
 `main` requires these status checks to pass before merge: `check (typecheck)`,
-`check (lint)`, `check (test)`, `coverage`. `build` is intentionally **not**
-required — it's path-filtered, so on PRs that don't touch app code it never runs
-and a required-but-absent check would block the merge forever.
+`check (lint)`, `check (test)`, `infra`, `coverage`. `build` is intentionally
+**not** required — it's path-filtered, so on PRs that don't touch app code it
+never runs and a required-but-absent check would block the merge forever.
 
 ---
 
