@@ -113,6 +113,9 @@ npx prisma migrate dev
 
 # 5. Start the dev server
 npm run dev
+
+# (optional) run the test suite — no database needed
+npm test
 ```
 
 Open [http://localhost:3000](http://localhost:3000).  
@@ -132,6 +135,57 @@ AUTH_SECRET=tennis123
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tennis
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
 ```
+
+---
+
+## Continuous Integration
+
+Every pull request runs typecheck, lint, and the unit-test suite before it can
+merge. `main` is branch-protected so nothing lands red.
+
+### Commands
+
+| Command | |
+|---|---|
+| `npm test` | run the Vitest suite once |
+| `npm run test:watch` | watch mode for local development |
+| `npm run coverage` | suite + a V8 coverage report (`coverage/`, gitignored) |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint |
+
+### What's tested
+
+[Vitest](https://vitest.dev), no database required — Prisma and `isAdmin()` are
+mocked at the module boundary.
+
+| Area | File |
+|---|---|
+| Session capacity math | [`src/lib/session.test.ts`](src/lib/session.test.ts) |
+| Admin token / cookie logic | [`src/lib/auth.test.ts`](src/lib/auth.test.ts) |
+| Pairing algorithm (shuffle, court split, sit-outs) | [`src/lib/pairings.test.ts`](src/lib/pairings.test.ts) |
+| `sessions` route handler | [`src/app/api/sessions/route.test.ts`](src/app/api/sessions/route.test.ts) |
+| `pairings` route handler | [`src/app/api/sessions/[id]/pairings/route.test.ts`](src/app/api/sessions/[id]/pairings/route.test.ts) |
+
+The Fisher-Yates shuffle and court-splitting logic lives in
+[`src/lib/pairings.ts`](src/lib/pairings.ts) as pure, seedable functions so it
+can be tested without a request or a database; the route handler just wires it
+to Prisma.
+
+### Pipeline
+
+| Workflow | Trigger | Does |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, plus a `coverage` job that uploads the HTML report as an artifact |
+| [`docker-build.yml`](.github/workflows/docker-build.yml) | PRs touching the image, deps, or `src/` | builds the runner + migrator images and smoke-tests `GET /api/health` against the running container |
+| [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)) |
+| [`migrate.yml`](.github/workflows/migrate.yml) | manual | `prisma migrate deploy` as a one-off Fargate task |
+
+### Branch protection
+
+`main` requires these status checks to pass before merge: `check (typecheck)`,
+`check (lint)`, `check (test)`, `coverage`. `build` is intentionally **not**
+required — it's path-filtered, so on PRs that don't touch app code it never runs
+and a required-but-absent check would block the merge forever.
 
 ---
 
