@@ -213,6 +213,12 @@ In CI the `e2e` job starts a `postgres:17` service container, runs
 `webServer`) and the suite against it; the job env sets `DATABASE_URL` and
 `AUTH_SECRET` on every side. The HTML report is uploaded as an artifact.
 
+> Code review caught a gap in the first cut: when Playwright reuses an
+> already-running `npm run dev`, `webServer.env` doesn't reach that server, so
+> the spec and the app could disagree on `AUTH_SECRET`. `playwright.config.ts`
+> now loads `.env.local` itself (CI's job env still takes precedence), keeping
+> both sides on the same value.
+
 ### Pipeline
 
 | Workflow | Trigger | Does |
