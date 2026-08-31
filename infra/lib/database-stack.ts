@@ -253,7 +253,7 @@ export class DatabaseStack extends cdk.Stack {
 
       // Single-AZ today (README: Multi-AZ only "if needed"). Toggling this
       // on later is an online change, safe to defer.
-      multiAz: true,
+      multiAz: false,
 
       // RDS console default backup retention is 7 days; the CLI/older console
       // default is 1. Set this to whatever `BackupRetentionPeriod` reports.
