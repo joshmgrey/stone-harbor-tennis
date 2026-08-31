@@ -195,6 +195,20 @@ asset is fingerprinted, not built.
 | [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)), then a post-deploy smoke test that polls the live domain — `/api/health` (body checked), `/api/sessions` (exercises RDS), and `/` (SSR) — and fails the run if the site isn't serving |
 | [`migrate.yml`](.github/workflows/migrate.yml) | manual | `prisma migrate deploy` as a one-off Fargate task |
 
+A full run of `deploy.yml` on `main` has gone green end to end: `cdk deploy
+AppStack` updated the ECS service, and the post-deploy smoke test then reached
+the live domain from outside AWS —
+
+```
+smoke-testing https://stone-harbor-invitational-tennis.org
+ok    /api/health -> 200
+ok    /api/sessions -> 200
+ok    / -> 200
+smoke test passed
+```
+
+confirming DNS → ALB → task → RDS and Next SSR are all serving the new revision.
+
 ### Branch protection
 
 `main` requires these status checks to pass before merge: `check (typecheck)`,
