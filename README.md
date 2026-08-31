@@ -168,3 +168,5 @@ Secrets Manager, injected into the container by ECS (never in the task definitio
 - **App**: push to `main` → `.github/workflows/deploy.yml` builds the image and runs `cdk deploy AppStack`.
 - **Migrations**: **Actions → migrate → Run workflow** — runs `prisma migrate deploy` as a one-off Fargate task in the VPC (the DB isn't reachable from outside it).
 - **Database changes**: `cd infra && npx cdk deploy DatabaseStack` from a machine with AWS credentials.
+
+<!-- branch-protection verification: safe to delete -->
