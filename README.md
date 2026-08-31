@@ -140,8 +140,9 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
 
 ## Continuous Integration
 
-Every pull request runs typecheck, lint, and the unit-test suite before it can
-merge. `main` is branch-protected so nothing lands red.
+Every pull request runs typecheck, lint, the unit suite, the infra CDK tests,
+and a Playwright end-to-end run before it can merge. `main` is branch-protected
+so nothing lands red.
 
 ### Commands
 
@@ -152,6 +153,7 @@ merge. `main` is branch-protected so nothing lands red.
 | `npm run coverage` | suite + a V8 coverage report (`coverage/`, gitignored) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
+| `npm run e2e` | Playwright end-to-end tests (needs Postgres — see below) |
 
 ### What's tested
 
@@ -186,11 +188,35 @@ checked against the properties that matter:
 No AWS credentials — VPC lookups resolve to a dummy VPC and the Docker image
 asset is fingerprinted, not built.
 
+### End-to-end tests
+
+[`e2e/`](e2e/) has a [Playwright](https://playwright.dev) suite that drives a
+real browser through one full happy path against a real Postgres:
+
+> home page renders → admin logs in → admin creates a session → four players
+> sign up on the public page → admin generates pairings and sees a full Court 1
+
+It exercises cookie auth, writes across the `sessions` / `players` / `signups`
+tables, the Fisher-Yates pairing endpoint, and SSR + client hydration on every
+page — the integration the mocked unit tests can't cover.
+
+```bash
+# needs a Postgres at DATABASE_URL with migrations applied, and AUTH_SECRET set
+npx playwright install chromium   # one-time
+npm run dev                       # in one terminal
+npm run e2e                       # in another — reuses the running dev server
+```
+
+In CI the `e2e` job starts a `postgres:17` service container, runs
+`prisma migrate deploy`, `npm run build`, then `npm run start` (via Playwright's
+`webServer`) and the suite against it; the HTML report is uploaded as an
+artifact.
+
 ### Pipeline
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, an `infra` job (CDK assertion tests), and a `coverage` job that uploads the HTML report as an artifact |
+| [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, an `infra` job (CDK assertion tests), an `e2e` job (Playwright against a Postgres service container), and a `coverage` job that uploads its report as an artifact |
 | [`docker-build.yml`](.github/workflows/docker-build.yml) | PRs touching the image, deps, or `src/` | builds the runner + migrator images and smoke-tests `GET /api/health` against the running container |
 | [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)), then a post-deploy smoke test that polls the live domain — `/api/health` (body checked), `/api/sessions` (exercises RDS), and `/` (SSR) — and fails the run if the site isn't serving |
 | [`migrate.yml`](.github/workflows/migrate.yml) | manual | `prisma migrate deploy` as a one-off Fargate task |
@@ -212,9 +238,10 @@ confirming DNS → ALB → task → RDS and Next SSR are all serving the new rev
 ### Branch protection
 
 `main` requires these status checks to pass before merge: `check (typecheck)`,
-`check (lint)`, `check (test)`, `infra`, `coverage`. `build` is intentionally
-**not** required — it's path-filtered, so on PRs that don't touch app code it
-never runs and a required-but-absent check would block the merge forever.
+`check (lint)`, `check (test)`, `infra`, `e2e`, `coverage`. `build` is
+intentionally **not** required — it's path-filtered, so on PRs that don't touch
+app code it never runs and a required-but-absent check would block the merge
+forever.
 
 The gate has been verified from both sides with throwaway PRs:
 
