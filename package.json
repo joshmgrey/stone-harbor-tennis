@@ -33,6 +33,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^4.1.11",
+    "autocannon": "^8.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.5",
     "jsdom": "^30.0.1",
