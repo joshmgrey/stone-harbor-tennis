@@ -201,7 +201,8 @@ tables, the Fisher-Yates pairing endpoint, and SSR + client hydration on every
 page — the integration the mocked unit tests can't cover.
 
 ```bash
-# needs a Postgres at DATABASE_URL with migrations applied, and AUTH_SECRET set
+# .env.local needs DATABASE_URL (migrations applied) and AUTH_SECRET —
+# playwright.config.ts reads .env.local so the spec and the dev server agree.
 npx playwright install chromium   # one-time
 npm run dev                       # in one terminal
 npm run e2e                       # in another — reuses the running dev server
@@ -209,8 +210,8 @@ npm run e2e                       # in another — reuses the running dev server
 
 In CI the `e2e` job starts a `postgres:17` service container, runs
 `prisma migrate deploy`, `npm run build`, then `npm run start` (via Playwright's
-`webServer`) and the suite against it; the HTML report is uploaded as an
-artifact.
+`webServer`) and the suite against it; the job env sets `DATABASE_URL` and
+`AUTH_SECRET` on every side. The HTML report is uploaded as an artifact.
 
 ### Pipeline
 

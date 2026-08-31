@@ -13,6 +13,9 @@ import { test, expect, type Page } from "@playwright/test";
  * Fisher-Yates pairing endpoint, and SSR + client hydration on every page.
  */
 
+// playwright.config.ts resolves this (from .env.local locally, the job env in
+// CI) and pins it on process.env before workers fork, so the app server and
+// this spec always use the same value.
 const ADMIN_PASSWORD = process.env.AUTH_SECRET ?? "e2e-admin-secret";
 const PLAYERS = ["Alice Ace", "Bob Baseline", "Carol Crosscourt", "Dave Dropshot"];
 
