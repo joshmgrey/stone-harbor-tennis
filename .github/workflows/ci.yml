@@ -1,9 +1,9 @@
 name: ci
 
-# Fast feedback on every PR (and on main after merge): typecheck, lint, the
-# app's Vitest unit suite, and the CDK assertion tests for infra/. No AWS, no
-# database — those live in docker-build.yml (image + smoke test) and the deploy
-# pipeline. Keep these green before making them required checks on the branch.
+# Feedback on every PR (and on main after merge): typecheck, lint, the app's
+# Vitest unit suite, the CDK assertion tests for infra/, and a Playwright E2E
+# run against a real Postgres. No AWS — the container image and its smoke test
+# live in docker-build.yml, deployment in deploy.yml.
 
 on:
   pull_request:
@@ -59,6 +59,55 @@ jobs:
       # the Docker image asset is only fingerprinted, not built.
       - run: npm test
         working-directory: infra
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tennis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # sslmode=disable: `next start` runs production mode, where
+      # src/lib/prisma.ts enforces TLS unless the URL opts out; the service
+      # container has no SSL.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tennis?sslmode=disable
+      AUTH_SECRET: e2e-admin-secret
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Apply the committed migrations to the fresh service-container DB, then
+      # build. Playwright's webServer runs `npm run start` against it (see
+      # playwright.config.ts).
+      - run: npx prisma migrate deploy
+      - run: npm run build
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
 
   coverage:
     runs-on: ubuntu-latest
