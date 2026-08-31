@@ -14,7 +14,29 @@ import { defineConfig, devices } from "@playwright/test";
  * fallback URL carries `?sslmode=disable`.
  */
 const PORT = 3000;
+
+// The spec and the app server must agree on AUTH_SECRET / DATABASE_URL. When
+// Playwright reuses an already-running `npm run dev` (the local flow),
+// `webServer.env` below is NOT applied to that server — it read `.env.local`.
+// So pull `.env.local` into this process too, unless the ambient env already
+// pinned the value (CI sets both on the job, on every side).
+if (!process.env.CI) {
+  try {
+    process.loadEnvFile(".env.local");
+  } catch {
+    // no .env.local (fresh clone) — fall through to the defaults below
+  }
+}
+
 const AUTH_SECRET = process.env.AUTH_SECRET ?? "e2e-admin-secret";
+const DATABASE_URL =
+  process.env.DATABASE_URL ??
+  "postgresql://postgres:postgres@localhost:5432/tennis?sslmode=disable";
+
+// Make the resolved values visible to the spec (workers fork after this runs)
+// and to a Playwright-managed server.
+process.env.AUTH_SECRET = AUTH_SECRET;
+process.env.DATABASE_URL = DATABASE_URL;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -40,11 +62,6 @@ export default defineConfig({
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: {
-      AUTH_SECRET,
-      DATABASE_URL:
-        process.env.DATABASE_URL ??
-        "postgresql://postgres:postgres@localhost:5432/tennis?sslmode=disable",
-    },
+    env: { AUTH_SECRET, DATABASE_URL },
   },
 });
