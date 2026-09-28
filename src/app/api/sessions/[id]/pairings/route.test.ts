@@ -5,6 +5,7 @@ const isAdmin = vi.fn();
 vi.mock("@/lib/auth", () => ({ isAdmin: () => isAdmin() }));
 
 const findMany = vi.fn();
+const pairingFindMany = vi.fn();
 const deleteMany = vi.fn();
 const create = vi.fn();
 const $transaction = vi.fn();
@@ -12,6 +13,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     signup: { findMany: (a: unknown) => findMany(a) },
     pairing: {
+      findMany: (a: unknown) => pairingFindMany(a),
       deleteMany: (a: unknown) => deleteMany(a),
       create: (a: unknown) => create(a),
     },
@@ -19,7 +21,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 const req = {} as NextRequest;
@@ -30,10 +32,37 @@ const signups = (n: number) =>
 beforeEach(() => {
   isAdmin.mockReset();
   findMany.mockReset();
+  pairingFindMany.mockReset().mockResolvedValue([]);
   deleteMany.mockReset().mockReturnValue({ op: "deleteMany" });
   create.mockReset().mockImplementation((a) => a);
   // The route builds [deleteMany, ...creates]; echo back the create payloads.
   $transaction.mockReset().mockImplementation((ops: unknown[]) => ops);
+});
+
+describe("GET /api/sessions/:id/pairings", () => {
+  it("returns the session's pairings ordered by court number", async () => {
+    const rows = [
+      { id: 1, session_id: 9, court_number: 1 },
+      { id: 2, session_id: 9, court_number: 2 },
+    ];
+    pairingFindMany.mockResolvedValue(rows);
+
+    const res = await GET(req, ctx("9"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(rows);
+    expect(pairingFindMany).toHaveBeenCalledWith({
+      where: { session_id: 9 },
+      orderBy: { court_number: "asc" },
+    });
+  });
+
+  it("returns an empty list when no pairings exist yet", async () => {
+    pairingFindMany.mockResolvedValue([]);
+
+    const res = await GET(req, ctx("1"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
 });
 
 describe("POST /api/sessions/:id/pairings", () => {
