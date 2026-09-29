@@ -23,7 +23,7 @@ jobs:
   migrate:
     runs-on: ubuntu-latest
     environment: production
-    if: vars.DATABASE_URL_SECRET_ARN != ''
+    if: vars.APP_DATABASE_URL_SECRET_ARN != ''
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:

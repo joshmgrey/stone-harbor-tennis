@@ -27,20 +27,22 @@ export interface AppStackProps extends cdk.StackProps {
   readonly googleMapsApiKey: string;
 
   /**
-   * Secrets Manager ARN holding the full `DATABASE_URL` connection string for
-   * the database OWNER (the RDS master user). Migrations run with it.
+   * The RDS master secret (`stone-harbor-tennis/rds/master`): JSON with
+   * `username`/`password` plus the `host`/`port` the RDS attachment merges
+   * in. DatabaseStack sets the instance's password from this same secret, so
+   * it is the only copy of the master password. Only the migrator reads it
+   * (scripts/migrate.mjs derives the owner URL from it).
    */
-  readonly databaseUrlSecretArn: string;
+  readonly dbMasterSecretArn: string;
 
   /**
-   * Optional Secrets Manager ARN holding the connection string for the app's
-   * least-privilege role (`postgresql://tennis_app:<pw>@<host>/<db>`). When
-   * set, the migrator creates/refreshes that role from it after every
-   * `migrate deploy` (scripts/sync-app-db-role.mjs), so this secret is the
-   * only copy of that password, and the service connects with it instead of
-   * the owner URL.
+   * Secrets Manager ARN holding the connection string for the app's
+   * least-privilege role (`postgresql://tennis_app:<pw>@<host>/<db>`). The
+   * service connects with it; the migrator creates/refreshes that role from
+   * it after every `migrate deploy` (scripts/sync-app-db-role.mjs), so this
+   * secret is the only copy of that password.
    */
-  readonly appDatabaseUrlSecretArn?: string;
+  readonly appDatabaseUrlSecretArn: string;
 
   /** Secrets Manager ARN holding the admin password (`AUTH_SECRET`). */
   readonly authSecretArn: string;
@@ -49,9 +51,8 @@ export interface AppStackProps extends cdk.StackProps {
 /**
  * B2 — the Next.js app on Fargate behind an ALB, in the default VPC.
  *
- * `DATABASE_URL` points at the existing (still public) RDS instance, so this
- * runs side-by-side with Amplify against the same data. B3 flips DNS; B4
- * takes the database private.
+ * The service connects to RDS as the least-privilege `tennis_app` role;
+ * only the migrator uses the master credentials.
  *
  * Deploys from CI only — the image is a Docker asset and the dev machine has
  * no Docker.
@@ -80,18 +81,16 @@ export class AppStack extends cdk.Stack {
       validation: acm.CertificateValidation.fromDns(zone),
     });
 
-    const databaseUrl = secretsmanager.Secret.fromSecretCompleteArn(
+    const dbMaster = secretsmanager.Secret.fromSecretCompleteArn(
       this,
-      "DatabaseUrlSecret",
-      props.databaseUrlSecretArn,
+      "DbMasterSecret",
+      props.dbMasterSecretArn,
     );
-    const appDatabaseUrl = props.appDatabaseUrlSecretArn
-      ? secretsmanager.Secret.fromSecretCompleteArn(
-          this,
-          "AppDatabaseUrlSecret",
-          props.appDatabaseUrlSecretArn,
-        )
-      : undefined;
+    const appDatabaseUrl = secretsmanager.Secret.fromSecretCompleteArn(
+      this,
+      "AppDatabaseUrlSecret",
+      props.appDatabaseUrlSecretArn,
+    );
     const authSecret = secretsmanager.Secret.fromSecretCompleteArn(
       this,
       "AuthSecret",
@@ -152,11 +151,8 @@ export class AppStack extends cdk.Stack {
             HOSTNAME: "0.0.0.0",
           },
           secrets: {
-            // The app connects as its least-privilege role when one is
-            // configured; the owner URL is only for migrations.
-            DATABASE_URL: ecs.Secret.fromSecretsManager(
-              appDatabaseUrl ?? databaseUrl,
-            ),
+            // The least-privilege app role; master creds are migrator-only.
+            DATABASE_URL: ecs.Secret.fromSecretsManager(appDatabaseUrl),
             AUTH_SECRET: ecs.Secret.fromSecretsManager(authSecret),
           },
           logDriver: ecs.LogDrivers.awsLogs({
@@ -201,19 +197,13 @@ export class AppStack extends cdk.Stack {
         target: "migrator",
         platform: ecrAssets.Platform.LINUX_AMD64,
       }),
-      // Migrate as the owner, then bring the app role in line with
-      // APP_DATABASE_URL (a no-op when that secret isn't configured).
-      command: [
-        "sh",
-        "-c",
-        "npx prisma migrate deploy && node scripts/sync-app-db-role.mjs",
-      ],
+      // Migrate as the owner (URL derived from the master secret JSON),
+      // then bring the app role in line with APP_DATABASE_URL.
+      command: ["node", "scripts/migrate.mjs"],
       environment: { NODE_ENV: "production" },
       secrets: {
-        DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrl),
-        ...(appDatabaseUrl && {
-          APP_DATABASE_URL: ecs.Secret.fromSecretsManager(appDatabaseUrl),
-        }),
+        DB_MASTER_SECRET: ecs.Secret.fromSecretsManager(dbMaster),
+        APP_DATABASE_URL: ecs.Secret.fromSecretsManager(appDatabaseUrl),
       },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: "migrate", logGroup }),
     });

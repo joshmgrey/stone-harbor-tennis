@@ -97,16 +97,18 @@ jobs:
       # Apply the committed migrations to the fresh service-container DB, then
       # build. Playwright's webServer runs `npm run start` against it (see
       # playwright.config.ts).
-      - run: npx prisma migrate deploy
-
-      # Create the least-privilege app role exactly as the prod migrator does
-      # (twice: the second run exercises the refresh path), prove it can't do
-      # DDL, then run the e2e app server as that role — so a missing grant
-      # fails here rather than 500ing in production.
-      - name: Sync the app DB role
+      # Migrate + create the least-privilege app role exactly as the prod
+      # migrator does: no DATABASE_URL, owner creds from the RDS-secret-shaped
+      # JSON (twice: the second run exercises the refresh path). Then prove the
+      # role can't do DDL and run the e2e app server as it — so a missing
+      # grant fails here rather than 500ing in production.
+      - name: Migrate and sync the app DB role (prod entry point)
+        env:
+          DATABASE_URL: ""
+          DB_MASTER_SECRET: '{"username":"postgres","password":"postgres","host":"localhost","port":5432,"dbname":"tennis","engine":"postgres"}'
         run: |
-          node scripts/sync-app-db-role.mjs
-          node scripts/sync-app-db-role.mjs
+          node scripts/migrate.mjs
+          node scripts/migrate.mjs
           node --input-type=module -e '
             import pg from "pg";
             const c = new pg.Client({ connectionString: process.env.APP_DATABASE_URL });

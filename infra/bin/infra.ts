@@ -112,7 +112,7 @@ new GitHubDeployStack(app, "GitHubDeployStack", {
 // thing configured): it builds a Docker image asset, so until you're ready
 // the other stacks stay usable on a machine without Docker. CI passes every
 // `app:*` value and gets the stack.
-if (opt("app:databaseUrlSecretArn")) {
+if (opt("app:appDatabaseUrlSecretArn")) {
   new AppStack(app, "AppStack", {
     env,
     description: "Path B: Next.js app on ECS Fargate + ALB in the default VPC",
@@ -122,8 +122,8 @@ if (opt("app:databaseUrlSecretArn")) {
     hostedZoneId: req("app:hostedZoneId"),
     zoneName: req("app:zoneName"),
     googleMapsApiKey: opt("app:googleMapsApiKey") ?? "",
-    databaseUrlSecretArn: req("app:databaseUrlSecretArn"),
-    appDatabaseUrlSecretArn: opt("app:appDatabaseUrlSecretArn"),
+    dbMasterSecretArn: req("app:dbMasterSecretArn"),
+    appDatabaseUrlSecretArn: req("app:appDatabaseUrlSecretArn"),
     authSecretArn: req("app:authSecretArn"),
   });
 }
