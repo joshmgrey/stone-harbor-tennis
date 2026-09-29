@@ -37,7 +37,8 @@ export interface AppStackProps extends cdk.StackProps {
    * least-privilege role (`postgresql://tennis_app:<pw>@<host>/<db>`). When
    * set, the migrator creates/refreshes that role from it after every
    * `migrate deploy` (scripts/sync-app-db-role.mjs), so this secret is the
-   * only copy of that password.
+   * only copy of that password, and the service connects with it instead of
+   * the owner URL.
    */
   readonly appDatabaseUrlSecretArn?: string;
 
@@ -151,7 +152,11 @@ export class AppStack extends cdk.Stack {
             HOSTNAME: "0.0.0.0",
           },
           secrets: {
-            DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrl),
+            // The app connects as its least-privilege role when one is
+            // configured; the owner URL is only for migrations.
+            DATABASE_URL: ecs.Secret.fromSecretsManager(
+              appDatabaseUrl ?? databaseUrl,
+            ),
             AUTH_SECRET: ecs.Secret.fromSecretsManager(authSecret),
           },
           logDriver: ecs.LogDrivers.awsLogs({

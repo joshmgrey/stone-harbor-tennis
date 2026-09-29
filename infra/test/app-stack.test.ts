@@ -74,7 +74,7 @@ describe("AppStack", () => {
     });
   });
 
-  it("gives only the migrator APP_DATABASE_URL when the app-role secret is set", () => {
+  it("runs the service as the app role and migrations as the owner when the app-role secret is set", () => {
     const app = new cdk.App();
     const stack = new AppStack(app, "AppStack", {
       env: ENV,
@@ -88,24 +88,41 @@ describe("AppStack", () => {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           Name: "migrate",
-          Secrets: Match.arrayWith([
-            Match.objectLike({ Name: "DATABASE_URL" }),
-            Match.objectLike({
+          Secrets: [
+            { Name: "DATABASE_URL", ValueFrom: BASE.databaseUrlSecretArn },
+            {
               Name: "APP_DATABASE_URL",
-              ValueFrom: Match.stringLikeRegexp("app-database-url"),
-            }),
-          ]),
+              ValueFrom:
+                "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
+            },
+          ],
         }),
       ]),
     });
-    // The service is switched over separately, once the role exists.
     t.hasResourceProperties("AWS::ECS::TaskDefinition", {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           PortMappings: Match.anyValue(),
-          Secrets: Match.not(
-            Match.arrayWith([Match.objectLike({ Name: "APP_DATABASE_URL" })]),
-          ),
+          Secrets: Match.arrayWith([
+            {
+              Name: "DATABASE_URL",
+              ValueFrom:
+                "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
+            },
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it("falls back to the owner URL for the service when no app-role secret is set", () => {
+    template.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          PortMappings: Match.anyValue(),
+          Secrets: Match.arrayWith([
+            { Name: "DATABASE_URL", ValueFrom: BASE.databaseUrlSecretArn },
+          ]),
         }),
       ]),
     });
