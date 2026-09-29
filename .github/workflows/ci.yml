@@ -102,10 +102,26 @@ jobs:
       # JSON (twice: the second run exercises the refresh path). Then prove the
       # role can't do DDL and run the e2e app server as it — so a missing
       # grant fails here rather than 500ing in production.
+      #
+      # The owner mimics the RDS master user: NOT a superuser (RDS gives it
+      # rds_superuser), just CREATEROLE + CREATEDB and ownership of the DB.
+      # The container's `postgres` is a real superuser and would hide
+      # statements RDS rejects (e.g. ALTER ROLE ... NOSUPERUSER).
+      - name: Create an RDS-like owner role
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const c = new pg.Client({ connectionString: process.env.DATABASE_URL });
+            await c.connect();
+            await c.query("CREATE ROLE rds_master WITH LOGIN CREATEROLE CREATEDB NOSUPERUSER PASSWORD $$rds_master_pw$$");
+            await c.query("ALTER DATABASE tennis OWNER TO rds_master");
+            await c.end();
+          '
+
       - name: Migrate and sync the app DB role (prod entry point)
         env:
           DATABASE_URL: ""
-          DB_MASTER_SECRET: '{"username":"postgres","password":"postgres","host":"localhost","port":5432,"dbname":"tennis","engine":"postgres"}'
+          DB_MASTER_SECRET: '{"username":"rds_master","password":"rds_master_pw","host":"localhost","port":5432,"dbname":"tennis","engine":"postgres"}'
         run: |
           node scripts/migrate.mjs
           node scripts/migrate.mjs

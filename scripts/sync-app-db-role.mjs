@@ -60,17 +60,27 @@ try {
 
   await client.query("BEGIN");
 
-  const { rowCount } = await client.query(
-    "SELECT 1 FROM pg_roles WHERE rolname = $1",
+  const { rows: existing } = await client.query(
+    "SELECT rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = $1",
     [role],
   );
+  const rowCount = existing.length;
   // DDL can't take bind parameters; escapeLiteral quotes the password.
   const pw = client.escapeLiteral(password);
-  await client.query(
-    rowCount
-      ? `ALTER ROLE ${r} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ${pw}`
-      : `CREATE ROLE ${r} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ${pw}`,
-  );
+  if (rowCount) {
+    // Only the password on ALTER: the RDS master user is not a real
+    // superuser, and Postgres rejects even a no-op NOSUPERUSER from it.
+    // Check the attributes instead of (re)setting them.
+    const { rolsuper, rolcreatedb, rolcreaterole } = existing[0];
+    if (rolsuper || rolcreatedb || rolcreaterole) {
+      throw new Error(`role "${role}" has SUPERUSER/CREATEDB/CREATEROLE; refusing to use it for the app`);
+    }
+    await client.query(`ALTER ROLE ${r} WITH LOGIN PASSWORD ${pw}`);
+  } else {
+    await client.query(
+      `CREATE ROLE ${r} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ${pw}`,
+    );
+  }
 
   const { rows } = await client.query("SELECT current_database() AS db");
   await client.query(`GRANT CONNECT ON DATABASE ${client.escapeIdentifier(rows[0].db)} TO ${r}`);
