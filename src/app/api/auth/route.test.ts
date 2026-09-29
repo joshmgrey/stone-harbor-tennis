@@ -30,6 +30,18 @@ describe("POST /api/auth", () => {
     expect(res.cookies.get("stone_harbor_tennis_auth")).toBeUndefined();
   });
 
+  it.each([
+    ["unset", undefined, {}],
+    ["unset", undefined, { password: "" }],
+    ["empty", "", {}],
+    ["empty", "", { password: "" }],
+  ])("refuses to log in when AUTH_SECRET is %s (secret %j, body %j)", async (_label, secret, body) => {
+    vi.stubEnv("AUTH_SECRET", secret);
+    const res = await POST(jsonRequest(body));
+    expect(res.status).toBe(401);
+    expect(res.cookies.get("stone_harbor_tennis_auth")).toBeUndefined();
+  });
+
   it("sets an httpOnly admin cookie for the correct password", async () => {
     const res = await POST(jsonRequest({ password: "s3cret" }));
     expect(res.status).toBe(200);

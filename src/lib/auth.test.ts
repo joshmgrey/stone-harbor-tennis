@@ -46,6 +46,23 @@ describe("auth", () => {
     expect(await isAdmin()).toBe(false);
   });
 
+  it.each([undefined, ""])(
+    "isAdmin fails closed when AUTH_SECRET is %j, even for the empty-secret token",
+    async (secret) => {
+      vi.stubEnv("AUTH_SECRET", secret);
+      getCookie.mockReturnValue({ value: expectedToken("") });
+      expect(await isAdmin()).toBe(false);
+    },
+  );
+
+  it.each([undefined, ""])(
+    "adminToken throws rather than minting a token when AUTH_SECRET is %j",
+    (secret) => {
+      vi.stubEnv("AUTH_SECRET", secret);
+      expect(() => adminToken()).toThrow("AUTH_SECRET is not set");
+    },
+  );
+
   it("isAdmin is false when a stale cookie no longer matches a rotated secret", async () => {
     getCookie.mockReturnValue({ value: expectedToken("old-secret") });
     expect(await isAdmin()).toBe(false);

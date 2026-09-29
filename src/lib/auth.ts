@@ -8,10 +8,13 @@ function tokenFor(password: string): string {
 }
 
 export async function isAdmin(): Promise<boolean> {
+  const secret = process.env.AUTH_SECRET;
+  // Fail closed. Without a secret the token would be the hash of "", which
+  // anyone reading this (public) repo could compute and send as a cookie.
+  if (!secret) return false;
   const store = await cookies();
   const cookie = store.get(COOKIE_NAME);
-  const expected = tokenFor(process.env.AUTH_SECRET ?? "");
-  return cookie?.value === expected;
+  return cookie?.value === tokenFor(secret);
 }
 
 export function cookieName(): string {
@@ -19,5 +22,7 @@ export function cookieName(): string {
 }
 
 export function adminToken(): string {
-  return tokenFor(process.env.AUTH_SECRET ?? "");
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) throw new Error("AUTH_SECRET is not set");
+  return tokenFor(secret);
 }
