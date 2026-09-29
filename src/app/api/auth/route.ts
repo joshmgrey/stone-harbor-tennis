@@ -3,7 +3,10 @@ import { cookieName, adminToken } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   const { password } = await req.json();
-  if (password !== process.env.AUTH_SECRET) {
+  const secret = process.env.AUTH_SECRET;
+  // With no secret configured, `undefined !== undefined` is false, so a body
+  // without a password would log in. Refuse instead.
+  if (!secret || password !== secret) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
   const res = NextResponse.json({ ok: true });

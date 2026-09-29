@@ -2,8 +2,9 @@ import { createHash } from "crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCookie = vi.fn();
+const cookiesFn = vi.fn(async () => ({ get: getCookie }));
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: getCookie }),
+  cookies: () => cookiesFn(),
 }));
 
 // Import after the mock is registered.
@@ -17,6 +18,7 @@ const expectedToken = (secret: string) =>
 describe("auth", () => {
   beforeEach(() => {
     getCookie.mockReset();
+    cookiesFn.mockClear();
     vi.stubEnv("AUTH_SECRET", "s3cret");
   });
   afterEach(() => {
@@ -45,6 +47,31 @@ describe("auth", () => {
     getCookie.mockReturnValue(undefined);
     expect(await isAdmin()).toBe(false);
   });
+
+  it.each([undefined, ""])(
+    "isAdmin fails closed when AUTH_SECRET is %j, even for the empty-secret token",
+    async (secret) => {
+      vi.stubEnv("AUTH_SECRET", secret);
+      getCookie.mockReturnValue({ value: expectedToken("") });
+      expect(await isAdmin()).toBe(false);
+    },
+  );
+
+  // cookies() is what opts /admin into per-request rendering; `next build`
+  // runs without AUTH_SECRET, so skipping it there would prerender /admin.
+  it("isAdmin reads cookies even when AUTH_SECRET is unset", async () => {
+    vi.stubEnv("AUTH_SECRET", undefined);
+    await isAdmin();
+    expect(cookiesFn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, ""])(
+    "adminToken throws rather than minting a token when AUTH_SECRET is %j",
+    (secret) => {
+      vi.stubEnv("AUTH_SECRET", secret);
+      expect(() => adminToken()).toThrow("AUTH_SECRET is not set");
+    },
+  );
 
   it("isAdmin is false when a stale cookie no longer matches a rotated secret", async () => {
     getCookie.mockReturnValue({ value: expectedToken("old-secret") });
