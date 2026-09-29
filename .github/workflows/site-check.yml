@@ -1,0 +1,43 @@
+name: site-check
+
+# Scheduled black-box check of the live site, including the database.
+#
+# deploy.yml's smoke test only runs when something ships. The Sep 2026 outage
+# happened with no deploy at all: the RDS password changed underneath the
+# running task, every DB-backed page 500'd, and `/api/health` (which skips the
+# DB on purpose) stayed green, so ECS saw nothing wrong. This catches that
+# class of failure within the hour instead of whenever someone notices.
+#
+# A failed scheduled run emails whoever last edited this cron. Note GitHub
+# disables scheduled workflows after 60 days with no repo activity; re-enable
+# from the Actions tab if that happens.
+
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly, off the top of the hour
+  workflow_dispatch:
+
+concurrency:
+  group: site-check
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Same guard as deploy.yml: skip until the domain is configured.
+    if: vars.ZONE_NAME != ''
+    steps:
+      - uses: actions/checkout@v5
+
+      # A shorter retry budget than a post-deploy check: nothing is rolling
+      # out, so a probe still failing after ~1 min is a real outage, not a
+      # task warming up.
+      - name: Probe the live site
+        env:
+          SMOKE_ATTEMPTS: "4"
+          SMOKE_INTERVAL: "20"
+        run: bash .github/scripts/smoke-test.sh "https://${{ vars.ZONE_NAME }}"
