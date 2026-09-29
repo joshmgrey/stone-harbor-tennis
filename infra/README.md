@@ -143,17 +143,22 @@ Note the `DeployRoleArn` output.
 
 ## B2 — Fargate app
 
-### 1. Two secrets (once)
+### 1. Secrets (once)
 
 ```bash
 aws secretsmanager create-secret --region us-east-2 \
   --name stone-harbor-tennis/app/auth-secret \
   --secret-string '<the admin password currently in Amplify>'
 
+# The app's least-privilege role (letters-and-digits password: no URL encoding).
 aws secretsmanager create-secret --region us-east-2 \
-  --name stone-harbor-tennis/app/database-url \
-  --secret-string 'postgresql://postgres:<PW>@tennis.<...>.us-east-2.rds.amazonaws.com:5432/postgres'
+  --name stone-harbor-tennis/app/app-database-url \
+  --secret-string 'postgresql://tennis_app:<PW>@tennis.<...>.us-east-2.rds.amazonaws.com:5432/postgres'
 ```
+
+The master credentials are **not** duplicated here: the migrator reads the
+`stone-harbor-tennis/rds/master` secret from Path A directly (see
+[Database credentials](#database-credentials-one-secret-per-password)).
 
 ### 2. GitHub repo config
 
@@ -168,7 +173,8 @@ Variables:
 | `VPC_ID` | `vpc-01ae611b3b789af52` (the default VPC) |
 | `HOSTED_ZONE_ID` | `Z0122083131AK1IA1P4HI` |
 | `ZONE_NAME` | `stone-harbor-invitational-tennis.org` |
-| `DATABASE_URL_SECRET_ARN` | ARN from step 1 |
+| `DB_MASTER_SECRET_ARN` | full ARN of `stone-harbor-tennis/rds/master` (Path A) |
+| `APP_DATABASE_URL_SECRET_ARN` | ARN of `app-database-url` from step 1 |
 | `AUTH_SECRET_ARN` | ARN from step 1 |
 
 Secret:
@@ -307,9 +313,9 @@ which creates `tennis_app` if needed, sets its password from
 GitHub variables: `DB_MASTER_SECRET_ARN` (the full ARN of `rds/master`) and
 `APP_DATABASE_URL_SECRET_ARN`.
 
-### Setting it up (once)
+### Setting it up from scratch
 
-1. **Create the secret.** Use a letters-and-digits password, so it needs no
+1. **Create the secret** (B2 step 1 covers this too). Use a letters-and-digits password, so it needs no
    URL encoding. Same host and database as the RDS instance:
 
    ```bash
@@ -319,13 +325,16 @@ GitHub variables: `DB_MASTER_SECRET_ARN` (the full ARN of `rds/master`) and
    ```
 
    Add its ARN as the GitHub variable **`APP_DATABASE_URL_SECRET_ARN`**.
-2. **Create the role.** Actions → **deploy** → Run workflow (so the migrator
-   task definition gets the new secret), wait for it to finish, then Actions
-   → **migrate** → Run workflow. The migrate task's log should end with
-   `app role "tennis_app" created; grants applied`.
-3. **Switch the service over.** This is a separate PR, so the site never
-   points at a role that doesn't exist yet. The service's `DATABASE_URL`
-   comes from `app-database-url`. The post-deploy smoke test verifies it.
+2. **Deploy, then create the role.** The service connects as `tennis_app`
+   from its first deploy, but the role only exists once **migrate** has run,
+   so DB-backed pages 500 (and the deploy's smoke test goes red) until then.
+   Run Actions → **deploy**, then Actions → **migrate**. The migrate task's
+   log should end with `app role "tennis_app" created; grants applied`. The
+   running task already has the right URL, so it recovers on its next
+   connection; no redeploy needed. That first deploy run stays red.
+
+   (The live site was moved over without that gap: the role was created
+   first, and the service switched in a later PR.)
 
 ### Rotating the app password
 
