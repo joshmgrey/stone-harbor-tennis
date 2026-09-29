@@ -283,3 +283,48 @@ Only once the Fargate app has been stable for a week or two.
 
 Path B complete. The database is private, the app is on Fargate, and there
 is no Amplify.
+
+## App database role (least privilege)
+
+The app connects as its own role, `tennis_app`, not the RDS master user. It
+can only read and write rows (`SELECT/INSERT/UPDATE/DELETE`): no DDL, no role
+management, no access to `_prisma_migrations`. Migrations still run as the
+master user.
+
+The role's password lives in **one** place: the `app-database-url` secret.
+After every `prisma migrate deploy`, the migrator task runs
+[`scripts/sync-app-db-role.mjs`](../scripts/sync-app-db-role.mjs), which
+creates the role if needed, sets its password from that secret, and reapplies
+the grants. It's idempotent, and a no-op until the secret is configured.
+
+| Secret | Used by | User |
+|---|---|---|
+| `stone-harbor-tennis/app/database-url` | migrator | `postgres` (owner) |
+| `stone-harbor-tennis/app/app-database-url` | migrator (to sync the role); the service, after step 3 | `tennis_app` |
+
+### Setting it up (once)
+
+1. **Create the secret.** Use a letters-and-digits password, so it needs no
+   URL encoding. Same host and database as `database-url`:
+
+   ```bash
+   aws secretsmanager create-secret --region us-east-2 \
+     --name stone-harbor-tennis/app/app-database-url \
+     --secret-string 'postgresql://tennis_app:<PW>@tennis.crqqgwm0ikee.us-east-2.rds.amazonaws.com:5432/postgres'
+   ```
+
+   Add its ARN as the GitHub variable **`APP_DATABASE_URL_SECRET_ARN`**.
+2. **Create the role.** Actions → **deploy** → Run workflow (so the migrator
+   task definition gets the new secret), wait for it to finish, then Actions
+   → **migrate** → Run workflow. The migrate task's log should end with
+   `app role "tennis_app" created; grants applied`.
+3. **Switch the service over.** This is a separate PR, so the site never
+   points at a role that doesn't exist yet. The service's `DATABASE_URL`
+   comes from `app-database-url`. The post-deploy smoke test verifies it.
+
+### Rotating the app password
+
+Edit `app-database-url` → run **migrate** (it sets the new password on the
+role) → force a new ECS deployment (the service reads secrets only when a
+task starts). The site returns 500s between the migrate run and the new task
+coming up, so do it at a quiet time.

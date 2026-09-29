@@ -26,8 +26,20 @@ export interface AppStackProps extends cdk.StackProps {
   /** NEXT_PUBLIC_ — inlined into the client bundle when the image is built. */
   readonly googleMapsApiKey: string;
 
-  /** Secrets Manager ARN holding the full `DATABASE_URL` connection string. */
+  /**
+   * Secrets Manager ARN holding the full `DATABASE_URL` connection string for
+   * the database OWNER (the RDS master user). Migrations run with it.
+   */
   readonly databaseUrlSecretArn: string;
+
+  /**
+   * Optional Secrets Manager ARN holding the connection string for the app's
+   * least-privilege role (`postgresql://tennis_app:<pw>@<host>/<db>`). When
+   * set, the migrator creates/refreshes that role from it after every
+   * `migrate deploy` (scripts/sync-app-db-role.mjs), so this secret is the
+   * only copy of that password.
+   */
+  readonly appDatabaseUrlSecretArn?: string;
 
   /** Secrets Manager ARN holding the admin password (`AUTH_SECRET`). */
   readonly authSecretArn: string;
@@ -72,6 +84,13 @@ export class AppStack extends cdk.Stack {
       "DatabaseUrlSecret",
       props.databaseUrlSecretArn,
     );
+    const appDatabaseUrl = props.appDatabaseUrlSecretArn
+      ? secretsmanager.Secret.fromSecretCompleteArn(
+          this,
+          "AppDatabaseUrlSecret",
+          props.appDatabaseUrlSecretArn,
+        )
+      : undefined;
     const authSecret = secretsmanager.Secret.fromSecretCompleteArn(
       this,
       "AuthSecret",
@@ -177,9 +196,20 @@ export class AppStack extends cdk.Stack {
         target: "migrator",
         platform: ecrAssets.Platform.LINUX_AMD64,
       }),
-      command: ["npx", "prisma", "migrate", "deploy"],
+      // Migrate as the owner, then bring the app role in line with
+      // APP_DATABASE_URL (a no-op when that secret isn't configured).
+      command: [
+        "sh",
+        "-c",
+        "npx prisma migrate deploy && node scripts/sync-app-db-role.mjs",
+      ],
       environment: { NODE_ENV: "production" },
-      secrets: { DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrl) },
+      secrets: {
+        DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrl),
+        ...(appDatabaseUrl && {
+          APP_DATABASE_URL: ecs.Secret.fromSecretsManager(appDatabaseUrl),
+        }),
+      },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: "migrate", logGroup }),
     });
 
