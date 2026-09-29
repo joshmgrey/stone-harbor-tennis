@@ -20,6 +20,7 @@ on:
       - "prisma/**"
       - "src/**"
       - "public/**"
+      - "scripts/**"
       - "infra/**"
       - ".github/workflows/deploy.yml"
       - ".github/scripts/smoke-test.sh"
@@ -67,6 +68,7 @@ jobs:
             -c app:zoneName='${{ vars.ZONE_NAME }}' \
             -c app:googleMapsApiKey='${{ secrets.GOOGLE_MAPS_API_KEY }}' \
             -c app:databaseUrlSecretArn='${{ vars.DATABASE_URL_SECRET_ARN }}' \
+            -c app:appDatabaseUrlSecretArn='${{ vars.APP_DATABASE_URL_SECRET_ARN }}' \
             -c app:authSecretArn='${{ vars.AUTH_SECRET_ARN }}'
 
       # Black-box check that the new revision is actually serving on the public

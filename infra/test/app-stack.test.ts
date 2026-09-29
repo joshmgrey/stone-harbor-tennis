@@ -57,14 +57,55 @@ describe("AppStack", () => {
     });
   });
 
-  it("defines a separate migrator task that runs `prisma migrate deploy`", () => {
+  it("defines a separate migrator task that migrates, then syncs the app role", () => {
     template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
     template.hasResourceProperties("AWS::ECS::TaskDefinition", {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           Name: "migrate",
-          Command: ["npx", "prisma", "migrate", "deploy"],
-          Secrets: Match.arrayWith([Match.objectLike({ Name: "DATABASE_URL" })]),
+          Command: [
+            "sh",
+            "-c",
+            "npx prisma migrate deploy && node scripts/sync-app-db-role.mjs",
+          ],
+          Secrets: [Match.objectLike({ Name: "DATABASE_URL" })],
+        }),
+      ]),
+    });
+  });
+
+  it("gives only the migrator APP_DATABASE_URL when the app-role secret is set", () => {
+    const app = new cdk.App();
+    const stack = new AppStack(app, "AppStack", {
+      env: ENV,
+      ...BASE,
+      appDatabaseUrlSecretArn:
+        "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
+    });
+    const t = Template.fromStack(stack);
+
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "migrate",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "DATABASE_URL" }),
+            Match.objectLike({
+              Name: "APP_DATABASE_URL",
+              ValueFrom: Match.stringLikeRegexp("app-database-url"),
+            }),
+          ]),
+        }),
+      ]),
+    });
+    // The service is switched over separately, once the role exists.
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          PortMappings: Match.anyValue(),
+          Secrets: Match.not(
+            Match.arrayWith([Match.objectLike({ Name: "APP_DATABASE_URL" })]),
+          ),
         }),
       ]),
     });

@@ -81,6 +81,8 @@ jobs:
       # src/lib/prisma.ts enforces TLS unless the URL opts out; the service
       # container has no SSL.
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tennis?sslmode=disable
+      # The app's least-privilege role; created by the sync step below.
+      APP_DATABASE_URL: postgresql://tennis_app:e2e-app-role-password@localhost:5432/tennis?sslmode=disable
       AUTH_SECRET: e2e-admin-secret
     steps:
       - uses: actions/checkout@v5
@@ -96,11 +98,34 @@ jobs:
       # build. Playwright's webServer runs `npm run start` against it (see
       # playwright.config.ts).
       - run: npx prisma migrate deploy
+
+      # Create the least-privilege app role exactly as the prod migrator does
+      # (twice: the second run exercises the refresh path), prove it can't do
+      # DDL, then run the e2e app server as that role — so a missing grant
+      # fails here rather than 500ing in production.
+      - name: Sync the app DB role
+        run: |
+          node scripts/sync-app-db-role.mjs
+          node scripts/sync-app-db-role.mjs
+          node --input-type=module -e '
+            import pg from "pg";
+            const c = new pg.Client({ connectionString: process.env.APP_DATABASE_URL });
+            await c.connect();
+            await c.query("SELECT count(*) FROM sessions");
+            for (const sql of ["DROP TABLE sessions", "SELECT * FROM _prisma_migrations"]) {
+              try { await c.query(sql); console.error("app role was allowed: " + sql); process.exit(1); }
+              catch (e) { if (e.code !== "42501") throw e; console.log("denied as expected: " + sql); }
+            }
+            await c.end();
+          '
+
       - run: npm run build
 
       - run: npx playwright install --with-deps chromium
 
       - run: npm run e2e
+        env:
+          DATABASE_URL: ${{ env.APP_DATABASE_URL }}
 
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}

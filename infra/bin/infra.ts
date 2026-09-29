@@ -123,6 +123,7 @@ if (opt("app:databaseUrlSecretArn")) {
     zoneName: req("app:zoneName"),
     googleMapsApiKey: opt("app:googleMapsApiKey") ?? "",
     databaseUrlSecretArn: req("app:databaseUrlSecretArn"),
+    appDatabaseUrlSecretArn: opt("app:appDatabaseUrlSecretArn"),
     authSecretArn: req("app:authSecretArn"),
   });
 }
