@@ -284,28 +284,33 @@ Only once the Fargate app has been stable for a week or two.
 Path B complete. The database is private, the app is on Fargate, and there
 is no Amplify.
 
-## App database role (least privilege)
+## Database credentials: one secret per password
 
 The app connects as its own role, `tennis_app`, not the RDS master user. It
 can only read and write rows (`SELECT/INSERT/UPDATE/DELETE`): no DDL, no role
-management, no access to `_prisma_migrations`. Migrations still run as the
-master user.
+management, no access to `_prisma_migrations`. Migrations run as the master
+user.
 
-The role's password lives in **one** place: the `app-database-url` secret.
-After every `prisma migrate deploy`, the migrator task runs
-[`scripts/sync-app-db-role.mjs`](../scripts/sync-app-db-role.mjs), which
-creates the role if needed, sets its password from that secret, and reapplies
-the grants. It's idempotent, and a no-op until the secret is configured.
+Each password lives in exactly **one** secret:
 
-| Secret | Used by | User |
+| Secret | Holds | Used by |
 |---|---|---|
-| `stone-harbor-tennis/app/database-url` | migrator | `postgres` (owner) |
-| `stone-harbor-tennis/app/app-database-url` | migrator (to sync the role); the service, after step 3 | `tennis_app` |
+| `stone-harbor-tennis/rds/master` | master (`postgres`) creds as JSON (`username`, `password`, `host`, `port`, …) | DatabaseStack sets the instance password from it; the migrator |
+| `stone-harbor-tennis/app/app-database-url` | `postgresql://tennis_app:…` URL | the service; the migrator (to sync the role) |
+
+The migrator task runs [`scripts/migrate.mjs`](../scripts/migrate.mjs): it
+builds the owner URL from the `rds/master` JSON, runs `prisma migrate deploy`,
+then runs [`scripts/sync-app-db-role.mjs`](../scripts/sync-app-db-role.mjs),
+which creates `tennis_app` if needed, sets its password from
+`app-database-url`, and reapplies the grants. Both are idempotent.
+
+GitHub variables: `DB_MASTER_SECRET_ARN` (the full ARN of `rds/master`) and
+`APP_DATABASE_URL_SECRET_ARN`.
 
 ### Setting it up (once)
 
 1. **Create the secret.** Use a letters-and-digits password, so it needs no
-   URL encoding. Same host and database as `database-url`:
+   URL encoding. Same host and database as the RDS instance:
 
    ```bash
    aws secretsmanager create-secret --region us-east-2 \
@@ -328,3 +333,11 @@ Edit `app-database-url` → run **migrate** (it sets the new password on the
 role) → force a new ECS deployment (the service reads secrets only when a
 task starts). The site returns 500s between the migrate run and the new task
 coming up, so do it at a quiet time.
+
+### Rotating the master password
+
+Keep the instance's "Manage master credentials in AWS Secrets Manager" **off**
+(RDS auto-rotation silently broke the site in Sep 2026). Then: RDS → Modify →
+new password → Apply immediately; put the same password in `rds/master`'s
+`password` field. The live site isn't affected (it uses `tennis_app`); run
+**migrate** to confirm the migrator can still connect.

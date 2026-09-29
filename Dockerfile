@@ -28,7 +28,8 @@ ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
 RUN npm run build
 
 # ---- migrator: one-off `prisma migrate deploy` (used by the CI pipeline) --
-# AppStack overrides the command to also run scripts/sync-app-db-role.mjs.
+# AppStack runs scripts/migrate.mjs instead: it derives the owner URL from the
+# RDS master secret, migrates, then syncs the app role.
 # Keeps the full toolchain so migrations run with a command override on the
 # same build, e.g. `docker run --entrypoint sh ... -c "npx prisma migrate deploy"`
 # or an ECS task that targets this stage.

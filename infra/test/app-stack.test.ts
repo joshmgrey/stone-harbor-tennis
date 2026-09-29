@@ -10,8 +10,10 @@ const BASE: Omit<AppStackProps, "env"> = {
   hostedZoneId: "Z0123456789ABCDEFGHIJ",
   zoneName: "stoneharbortennis.com",
   googleMapsApiKey: "",
-  databaseUrlSecretArn:
-    "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/database-url-AbCdEf",
+  dbMasterSecretArn:
+    "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/rds/master-AbCdEf",
+  appDatabaseUrlSecretArn:
+    "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
   authSecretArn:
     "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/auth-secret-AbCdEf",
 };
@@ -63,66 +65,32 @@ describe("AppStack", () => {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           Name: "migrate",
-          Command: [
-            "sh",
-            "-c",
-            "npx prisma migrate deploy && node scripts/sync-app-db-role.mjs",
-          ],
-          Secrets: [Match.objectLike({ Name: "DATABASE_URL" })],
+          Command: ["node", "scripts/migrate.mjs"],
         }),
       ]),
     });
   });
 
-  it("runs the service as the app role and migrations as the owner when the app-role secret is set", () => {
-    const app = new cdk.App();
-    const stack = new AppStack(app, "AppStack", {
-      env: ENV,
-      ...BASE,
-      appDatabaseUrlSecretArn:
-        "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
-    });
-    const t = Template.fromStack(stack);
-
-    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+  it("gives the master secret to the migrator only; the service runs as the app role", () => {
+    template.hasResourceProperties("AWS::ECS::TaskDefinition", {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           Name: "migrate",
           Secrets: [
-            { Name: "DATABASE_URL", ValueFrom: BASE.databaseUrlSecretArn },
-            {
-              Name: "APP_DATABASE_URL",
-              ValueFrom:
-                "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
-            },
+            { Name: "DB_MASTER_SECRET", ValueFrom: BASE.dbMasterSecretArn },
+            { Name: "APP_DATABASE_URL", ValueFrom: BASE.appDatabaseUrlSecretArn },
           ],
         }),
       ]),
     });
-    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
-      ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({
-          PortMappings: Match.anyValue(),
-          Secrets: Match.arrayWith([
-            {
-              Name: "DATABASE_URL",
-              ValueFrom:
-                "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
-            },
-          ]),
-        }),
-      ]),
-    });
-  });
-
-  it("falls back to the owner URL for the service when no app-role secret is set", () => {
     template.hasResourceProperties("AWS::ECS::TaskDefinition", {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
           PortMappings: Match.anyValue(),
-          Secrets: Match.arrayWith([
-            { Name: "DATABASE_URL", ValueFrom: BASE.databaseUrlSecretArn },
-          ]),
+          Secrets: [
+            { Name: "DATABASE_URL", ValueFrom: BASE.appDatabaseUrlSecretArn },
+            Match.objectLike({ Name: "AUTH_SECRET" }),
+          ],
         }),
       ]),
     });

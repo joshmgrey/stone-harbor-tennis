@@ -284,8 +284,8 @@ Secrets Manager, injected into the container by ECS (never in the task definitio
 
 | Secret | |
 |---|---|
-| `stone-harbor-tennis/app/database-url` | owner (`postgres`) connection string; migrations |
-| `stone-harbor-tennis/app/app-database-url` | the app's least-privilege `tennis_app` role ([details](infra/README.md#app-database-role-least-privilege)) |
+| `stone-harbor-tennis/rds/master` | master (`postgres`) credentials JSON; migrations only |
+| `stone-harbor-tennis/app/app-database-url` | the app's least-privilege `tennis_app` role ([details](infra/README.md#database-credentials-one-secret-per-password)) |
 | `stone-harbor-tennis/app/auth-secret` | the admin password (`AUTH_SECRET`) |
 
 `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is a **build arg** (inlined into the client bundle at image build time), supplied from the `GOOGLE_MAPS_API_KEY` GitHub Actions secret.
