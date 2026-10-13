@@ -192,6 +192,11 @@ client singleton, which every test mocks out. It's covered end to end instead.
 Every other file is at 100% lines except `sessions/[id]/signups/route.ts`
 (96%, one uncovered line).
 
+These are enforced: [`vitest.config.mts`](vitest.config.mts) sets coverage
+thresholds of 93% statements, 83% branches, 96% functions and 93% lines, so
+`npm run coverage` (and the required `coverage` CI check) fails if any metric
+drops below them.
+
 The Fisher-Yates shuffle and court-splitting logic lives in
 [`src/lib/pairings.ts`](src/lib/pairings.ts) as pure, seedable functions so it
 can be tested without a request or a database; the route handler just wires it
