@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { capacity } from "@/lib/session";
+import { publicPlayerSelect } from "@/lib/player";
 
 /** Thrown inside the signup transaction when the session has no room left. */
 class SessionFullError extends Error {}
@@ -76,7 +77,9 @@ export async function POST(
           player_id: player.id,
           is_alternate: asAlternate,
         },
-        include: { player: true },
+        // Public response: no phone. Signing up under an existing name must
+        // not reveal the number already on file for it.
+        include: { player: { select: publicPlayerSelect } },
       });
     });
 

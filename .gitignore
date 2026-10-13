@@ -39,6 +39,11 @@ yarn-error.log*
 .env*
 !.env.local.example
 
+# local database files (the app uses Postgres; these are leftovers)
+*.db
+*.sqlite
+*.sqlite3
+
 # vercel
 .vercel
 

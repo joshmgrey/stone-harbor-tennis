@@ -2,26 +2,43 @@
 
 Infrastructure-as-code for Stone Harbor Invitational Tennis.
 
-**Status: Path A — adopt the existing RDS instance, no behavioural changes.**
+**Status: Path B complete.** The app runs on ECS Fargate behind an ALB, the
+RDS PostgreSQL 17 instance is private (reachable only from the Fargate
+service's security group), and Amplify is gone.
 
-The database is a manually-provisioned, publicly-accessible RDS PostgreSQL 17
-instance (see the main [README](../README.md#deployment-aws)).
-`DatabaseStack` describes that instance property-for-property so `cdk import`
-can adopt it with an **empty diff**. The synthesized template is a single
-`AWS::RDS::DBInstance`, so the import can't be blocked by a non-importable
-resource type. The instance stays public. Moving it into a private VPC is a
-later, separate change.
+| Stack | What it is | Deployed from |
+|---|---|---|
+| `DatabaseStack` | the RDS instance (adopted via `cdk import`) + its SG, admitting `5432` only from the app SG | laptop |
+| `GitHubDeployStack` | GitHub OIDC provider + the role CI assumes | laptop (rarely) |
+| `AppStack` | ECR image, Fargate service, ALB, ACM cert, Route 53 records, migrator task | CI (`deploy.yml`) |
+
+Day-to-day operations: [migrations](#migrations-from-here-on),
+[database credentials](#database-credentials-one-secret-per-password) (incl.
+password rotation). Everything from [Path A](#path-a--adopt-the-rds-instance-history)
+through [B5](#b5--decommission) below is the record of **how it got here**:
+the instance was originally manually provisioned and public, adopted into
+CDK unchanged (Path A), then moved behind Fargate and made private (Path B).
+Those steps are done; keep them for reference or a rebuild.
 
 ## Layout
 
 ```
 infra/
-├── bin/infra.ts             CDK app entrypoint; wires context -> DatabaseStack
-├── lib/database-stack.ts     the instance, described for import
-├── cdk.json                  app command + feature flags (committed)
-├── cdk.context.json          db:* / env:* values + VPC lookup cache (GITIGNORED)
+├── bin/infra.ts                 CDK app entrypoint; wires context -> stacks
+├── lib/database-stack.ts        RDS instance (described for import) + its SG
+├── lib/app-stack.ts             Fargate service, ALB, DNS, migrator task
+├── lib/github-deploy-stack.ts   OIDC provider + CI deploy role
+├── test/*.test.ts               CDK assertion tests (`npm test`)
+├── cdk.json                     app command + feature flags (committed)
+├── cdk.context.json             db:* / env:* values + VPC lookup cache (GITIGNORED)
+├── vitest.config.mts
 └── tsconfig.json
 ```
+
+Each stack is only in the tree when its context is present: `DatabaseStack`
+needs `db:instanceIdentifier`, `AppStack` needs `app:appDatabaseUrlSecretArn`
+(CI passes every `app:*` value from repo variables), `GitHubDeployStack` is
+always there.
 
 ## Context is gitignored
 
@@ -32,7 +49,9 @@ values there locally, or pass them with `-c key=value`. CI / another machine
 re-derives the lookup cache from AWS credentials and re-supplies `db:*`.
 
 `infra/cdk.context.json` (create if missing — all values are placeholders
-here on purpose; fill from the RDS console / the query below):
+here on purpose; fill from the RDS console / the query below).
+`db:appSecurityGroupId` is the Fargate service's security group, the
+`ServiceSecurityGroupId` output of `AppStack`:
 
 ```json
 {
@@ -43,7 +62,7 @@ here on purpose; fill from the RDS console / the query below):
   "db:allocatedStorageGib": "20",
   "db:vpcId": "vpc-XXXXXXXX",
   "db:subnetGroupName": "default-vpc-XXXXXXXX",
-  "db:securityGroupId": "sg-XXXXXXXX",
+  "db:appSecurityGroupId": "sg-XXXXXXXX",
   "db:masterUsername": "postgres",
   "db:kmsKeyArn": "arn:aws:kms:us-east-2:<account id>:key/XXXXXXXX",
   "db:masterSecretArn": "<fill in after creating the secret — see below>"
@@ -71,15 +90,26 @@ instance): `db.t3.micro`, `gp2`, storage encrypted, autoscaling ceiling
 cd infra && npm install
 ```
 
-`cdk bootstrap` is **not** required. This stack uses
+`DatabaseStack` doesn't need `cdk bootstrap` (the account is bootstrapped
+anyway, for `AppStack` — see [B0](#b0--bootstrap--deploy-role)). It uses
 `CliCredentialsStackSynthesizer` (see `bin/infra.ts`) — every CloudFormation
 call runs with your CLI credentials, no bootstrap roles or staging bucket.
 `cdk import` rejects the bootstrap exec role (`RoleArn`) and stack tags, so
 the stack carries neither.
 
+---
+
+# Path A — adopt the RDS instance (history)
+
+Done. The instance was manually provisioned and public; these steps adopted
+it into `DatabaseStack` with an **empty diff** (the template was then a
+single `AWS::RDS::DBInstance`, so nothing non-importable could block the
+import) and changed nothing about it. Making it private came later, in
+[B4](#b4--database-private).
+
 ## Create the credentials secret
 
-The password is the one already in your Amplify `DATABASE_URL`:
+The password was the one in the Amplify app's `DATABASE_URL` at the time:
 
 ```bash
 aws secretsmanager create-secret --region us-east-2 --name stone-harbor-tennis/rds/master --secret-string '{"username":"postgres","password":"<CURRENT_PASSWORD>"}'
@@ -122,20 +152,23 @@ deploy`, no instance change). The secret now also carries `host` / `port` /
 
 ---
 
-# Path B — app off Amplify, database private
+# Path B — app off Amplify, database private (history)
 
-Stacks beyond `DatabaseStack`:
+Done: B0–B5 below all ran. The [migrations](#migrations-from-here-on)
+subsection under B4 and the
+[database credentials](#database-credentials-one-secret-per-password) section
+after B5 are the current runbooks.
 
 | Stack | Deploy from | Notes |
 |---|---|---|
 | `GitHubDeployStack` | laptop (once) | OIDC provider + `cdk deploy` role for CI |
-| `AppStack` | CI only | Docker image asset; only in the tree when `app:domainName` is set |
+| `AppStack` | CI only | Docker image asset; only in the tree when `app:appDatabaseUrlSecretArn` is set |
 
 ## B0 — bootstrap + deploy role
 
 ```bash
 cd infra
-npx cdk bootstrap aws://462096274792/us-east-2
+npx cdk bootstrap aws://<account id>/us-east-2
 npx cdk deploy GitHubDeployStack
 ```
 
@@ -148,7 +181,7 @@ Note the `DeployRoleArn` output.
 ```bash
 aws secretsmanager create-secret --region us-east-2 \
   --name stone-harbor-tennis/app/auth-secret \
-  --secret-string '<the admin password currently in Amplify>'
+  --secret-string '<the admin password (then in Amplify)>'
 
 # The app's least-privilege role (letters-and-digits password: no URL encoding).
 aws secretsmanager create-secret --region us-east-2 \
@@ -168,10 +201,10 @@ Variables:
 
 | Name | Value |
 |---|---|
-| `AWS_ACCOUNT_ID` | `462096274792` |
+| `AWS_ACCOUNT_ID` | `<account id>` |
 | `AWS_DEPLOY_ROLE_ARN` | the `DeployRoleArn` from B0 |
-| `VPC_ID` | `vpc-01ae611b3b789af52` (the default VPC) |
-| `HOSTED_ZONE_ID` | `Z0122083131AK1IA1P4HI` |
+| `VPC_ID` | `vpc-XXXXXXXX` (the default VPC) |
+| `HOSTED_ZONE_ID` | `<hosted zone id>` (Route 53 → Hosted zones) |
 | `ZONE_NAME` | `stone-harbor-invitational-tennis.org` |
 | `DB_MASTER_SECRET_ARN` | full ARN of `stone-harbor-tennis/rds/master` (Path A) |
 | `APP_DATABASE_URL_SECRET_ARN` | ARN of `app-database-url` from step 1 |
@@ -185,9 +218,11 @@ Secret:
 
 ### 3. Deploy
 
-Merging B2 to `main` runs `.github/workflows/deploy.yml`: `prisma migrate
-deploy` (DB still public) → `cdk deploy AppStack` (builds the image, creates
-the ALB + service). Or trigger it manually with **Run workflow**.
+Merging B2 to `main` ran `.github/workflows/deploy.yml`, which at the time
+did `prisma migrate deploy` (DB still public) → `cdk deploy AppStack` (builds
+the image, creates the ALB + service). Today `deploy.yml` is `cdk deploy
+AppStack` + a smoke test only; migrations moved to `migrate.yml` in
+[B4](#b4--database-private).
 
 The ACM cert (DNS-validated) covers the apex, `www.`, **and**
 `new.<ZONE_NAME>`. Only `new.<ZONE_NAME>` gets a Route 53 record now — that's
@@ -215,7 +250,7 @@ the apex with no record).
 **Before merging B3**, note the current targets so you can roll back:
 
 ```bash
-aws route53 list-resource-record-sets --hosted-zone-id Z0122083131AK1IA1P4HI \
+aws route53 list-resource-record-sets --hosted-zone-id <hosted zone id> \
   --query "ResourceRecordSets[?Name=='stone-harbor-invitational-tennis.org.' || Name=='www.stone-harbor-invitational-tennis.org.']"
 ```
 
@@ -233,13 +268,13 @@ Order after merging:
    definition** and its outputs. (No migrate step in `deploy.yml` any more.)
 3. **`cdk deploy DatabaseStack`** (laptop) — `publiclyAccessible: false` +
    a CDK-managed SG admitting 5432 only from `db:appSecurityGroupId`
-   (`sg-0827a63415fdba069`, the `ServiceSecurityGroupId` output). Approve the
+   (`sg-XXXXXXXX`, the `ServiceSecurityGroupId` output). Approve the
    security prompt. This is an **online modify** — a few seconds' connection
    reset, no replacement. Prisma reconnects.
 4. Verify the site still loads. The RDS DNS name now resolves to the private
    IP (from in-VPC); the app reaches it through the SG.
 
-`db:securityGroupId` (the old `0.0.0.0/0` SG, `sg-00ad52e709e351b65`) is no
+`db:securityGroupId` (the old `0.0.0.0/0` SG) is no
 longer used — B5 deletes it.
 
 ### Migrations, from here on
@@ -271,7 +306,7 @@ tunnel through a bastion (not set up — add if you need it).
 Only once the Fargate app has been stable for a week or two.
 
 1. **`*` wildcard record** — Route 53 → the zone → delete the `*` record (it
-   points at Amplify's CloudFront `d2dqxtu5y326f4.cloudfront.net`, which is
+   points at Amplify's CloudFront distribution (`<id>.cloudfront.net`), which is
    about to disappear). apex / www / new. are all explicit records and
    unaffected.
 2. **Amplify app** — Amplify console → the app → **App settings → General →
@@ -279,7 +314,7 @@ Only once the Fargate app has been stable for a week or two.
    `curl -sI https://stone-harbor-invitational-tennis.org` should still be
    200. If Amplify's teardown removed either record, run
    `cdk deploy AppStack` — `deleteExisting` recreates them.
-3. **Old RDS security group** — delete `sg-00ad52e709e351b65` (the old
+3. **Old RDS security group** — delete it (the old
    `0.0.0.0/0` one). It's been unattached since B4.
 4. **Stale ACM validation CNAMEs** — Route 53 may still have `_...acm-validations`
    records for Amplify's old cert. Harmless; delete for tidiness.
@@ -321,7 +356,7 @@ GitHub variables: `DB_MASTER_SECRET_ARN` (the full ARN of `rds/master`) and
    ```bash
    aws secretsmanager create-secret --region us-east-2 \
      --name stone-harbor-tennis/app/app-database-url \
-     --secret-string 'postgresql://tennis_app:<PW>@tennis.crqqgwm0ikee.us-east-2.rds.amazonaws.com:5432/postgres'
+     --secret-string 'postgresql://tennis_app:<PW>@tennis.<...>.us-east-2.rds.amazonaws.com:5432/postgres'
    ```
 
    Add its ARN as the GitHub variable **`APP_DATABASE_URL_SECRET_ARN`**.

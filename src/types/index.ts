@@ -23,7 +23,8 @@ export interface Signup {
 export interface Player {
   id: number;
   name: string;
-  phone: string | null;
+  /** Only present in admin responses; public routes never send it. */
+  phone?: string | null;
   created_at: string;
 }
 

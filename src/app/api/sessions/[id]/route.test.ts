@@ -61,6 +61,32 @@ describe("GET /api/sessions/:id", () => {
     );
   });
 
+  it("omits players' phone numbers for a public visitor", async () => {
+    isAdmin.mockResolvedValue(false);
+    findUnique.mockResolvedValue({ id: 1, _count: { signups: 0 } });
+
+    await GET(req, ctx("1"));
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          player: { select: { id: true, name: true, created_at: true } },
+        },
+      })
+    );
+  });
+
+  it("includes players' phone numbers for an admin", async () => {
+    isAdmin.mockResolvedValue(true);
+    findUnique.mockResolvedValue({ id: 1, _count: { signups: 0 } });
+
+    await GET(req, ctx("1"));
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ include: { player: true } })
+    );
+  });
+
   it("returns 404 when the session does not exist", async () => {
     findUnique.mockResolvedValue(null);
 

@@ -69,6 +69,18 @@ describe("POST /api/sessions/:id/signups", () => {
     );
   });
 
+  it("does not return the player's phone number", async () => {
+    await POST(jsonRequest({ name: "Alice" }), ctx("1"));
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          player: { select: { id: true, name: true, created_at: true } },
+        },
+      })
+    );
+  });
+
   it("locks the session row before checking capacity", async () => {
     count.mockResolvedValue(3);
 
