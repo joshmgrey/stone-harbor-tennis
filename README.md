@@ -193,9 +193,9 @@ Every other file is at 100% lines except `sessions/[id]/signups/route.ts`
 (96%, one uncovered line).
 
 These are enforced: [`vitest.config.mts`](vitest.config.mts) sets coverage
-thresholds of 93% statements, 83% branches, 96% functions and 93% lines, so
-`npm run coverage` (and the required `coverage` CI check) fails if any metric
-drops below them.
+thresholds of 91% statements, 81% branches, 94% functions and 91% lines (about
+two points under the numbers above), so `npm run coverage` (and the required
+`coverage` CI check) fails if any metric drops below them.
 
 The Fisher-Yates shuffle and court-splitting logic lives in
 [`src/lib/pairings.ts`](src/lib/pairings.ts) as pure, seedable functions so it

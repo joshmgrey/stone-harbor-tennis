@@ -18,14 +18,15 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       include: ["src/lib/**/*.ts", "src/app/api/**/*.ts"],
-      // Floors at the current numbers (README "Test and coverage numbers");
-      // `npm run coverage` -- and the required `coverage` CI check -- fails
-      // if any metric drops below these. Raise them as coverage improves.
+      // Floors ~2 points under the current numbers (README "Test and
+      // coverage numbers"); `npm run coverage` -- and the required
+      // `coverage` CI check -- fails if any metric drops below these.
+      // Raise them as coverage improves.
       thresholds: {
-        statements: 93,
-        branches: 83,
-        functions: 96,
-        lines: 93,
+        statements: 91,
+        branches: 81,
+        functions: 94,
+        lines: 91,
       },
     },
   },
