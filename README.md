@@ -180,11 +180,11 @@ mocked at the module boundary.
 
 ### Test and coverage numbers
 
-As of 2026-10-12 (`main` @ `edd116c`), all passing:
+As of 2026-10-12 (`main` @ `1a53447`), all passing:
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 13 | 73 |
+| Unit (`npm test`) | 13 | 76 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
 
@@ -192,7 +192,7 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 93.9% (138/147) | 83.6% (56/67) | 96.7% (29/30) | 93.7% (134/143) |
+| 93.9% (139/148) | 84.1% (58/69) | 96.7% (29/30) | 93.8% (135/144) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.
