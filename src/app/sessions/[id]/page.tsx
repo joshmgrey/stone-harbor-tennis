@@ -74,15 +74,6 @@ export default function SessionPage() {
     runInitialLoad();
   }, [load]);
 
-  function handleNameChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value;
-    setName(val);
-    const match = knownPlayers.find(
-      (p) => p.name.toLowerCase() === val.trim().toLowerCase()
-    );
-    if (match?.phone) setPhone(match.phone);
-  }
-
   async function submitSignup(asAlternate: boolean) {
     if (!name.trim()) {
       setError("Please enter your name.");
@@ -254,7 +245,7 @@ export default function SessionPage() {
                 type="text"
                 list="known-players"
                 value={name}
-                onChange={handleNameChange}
+                onChange={(e) => setName(e.target.value)}
                 required
                 placeholder="Select or type your name"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
@@ -274,6 +265,10 @@ export default function SessionPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Phone <span className="text-gray-400 font-normal">(optional)</span>
               </label>
+              <p className="text-xs text-gray-400 mb-1">
+                Only the organizer sees this. Returning players can leave it
+                blank to keep the number on file.
+              </p>
               <input
                 type="tel"
                 value={phone}
@@ -328,9 +323,6 @@ export default function SessionPage() {
               <li key={s.id} className="flex items-center gap-3 py-2.5">
                 <span className="text-gray-400 text-sm w-5 text-right shrink-0">{i + 1}.</span>
                 <span className="font-medium text-gray-800">{s.player.name}</span>
-                {s.player.phone && (
-                  <span className="text-gray-400 text-xs ml-auto">{s.player.phone}</span>
-                )}
               </li>
             ))}
           </ul>
@@ -346,9 +338,6 @@ export default function SessionPage() {
                 <li key={s.id} className="flex items-center gap-3 py-2">
                   <span className="text-gray-300 text-sm w-5 text-right shrink-0">{i + 1}.</span>
                   <span className="text-gray-600">{s.player.name}</span>
-                  {s.player.phone && (
-                    <span className="text-gray-300 text-xs ml-auto">{s.player.phone}</span>
-                  )}
                 </li>
               ))}
             </ul>

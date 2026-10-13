@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/auth";
+import { publicPlayerSelect } from "@/lib/player";
 
 export async function GET(
   _req: NextRequest,
@@ -23,7 +24,11 @@ export async function GET(
     where: { session_id: Number(id) },
     // Regulars first (by sign-up time), then alternates in join order.
     orderBy: [{ is_alternate: "asc" }, { signed_up_at: "asc" }],
-    include: { player: true },
+    // Both the public session page and the admin page read this route; only
+    // the organizer gets phone numbers.
+    include: {
+      player: (await isAdmin()) ? true : { select: publicPlayerSelect },
+    },
   });
 
   const { _count, max_players: _drop, ...rest } = session;
