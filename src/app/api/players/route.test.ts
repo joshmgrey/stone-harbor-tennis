@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 describe("GET /api/players", () => {
-  it("returns players ordered by name", async () => {
+  it("returns players ordered by name, without phone numbers", async () => {
     const players = [
       { id: 1, name: "Alice" },
       { id: 2, name: "Bob" },
@@ -22,6 +22,9 @@ describe("GET /api/players", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(players);
-    expect(findMany).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
+    expect(findMany).toHaveBeenCalledWith({
+      select: { id: true, name: true, created_at: true },
+      orderBy: { name: "asc" },
+    });
   });
 });
