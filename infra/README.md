@@ -168,7 +168,7 @@ after B5 are the current runbooks.
 
 ```bash
 cd infra
-npx cdk bootstrap aws://462096274792/us-east-2
+npx cdk bootstrap aws://<account id>/us-east-2
 npx cdk deploy GitHubDeployStack
 ```
 
@@ -201,10 +201,10 @@ Variables:
 
 | Name | Value |
 |---|---|
-| `AWS_ACCOUNT_ID` | `462096274792` |
+| `AWS_ACCOUNT_ID` | `<account id>` |
 | `AWS_DEPLOY_ROLE_ARN` | the `DeployRoleArn` from B0 |
-| `VPC_ID` | `vpc-01ae611b3b789af52` (the default VPC) |
-| `HOSTED_ZONE_ID` | `Z0122083131AK1IA1P4HI` |
+| `VPC_ID` | `vpc-XXXXXXXX` (the default VPC) |
+| `HOSTED_ZONE_ID` | `<hosted zone id>` (Route 53 → Hosted zones) |
 | `ZONE_NAME` | `stone-harbor-invitational-tennis.org` |
 | `DB_MASTER_SECRET_ARN` | full ARN of `stone-harbor-tennis/rds/master` (Path A) |
 | `APP_DATABASE_URL_SECRET_ARN` | ARN of `app-database-url` from step 1 |
@@ -250,7 +250,7 @@ the apex with no record).
 **Before merging B3**, note the current targets so you can roll back:
 
 ```bash
-aws route53 list-resource-record-sets --hosted-zone-id Z0122083131AK1IA1P4HI \
+aws route53 list-resource-record-sets --hosted-zone-id <hosted zone id> \
   --query "ResourceRecordSets[?Name=='stone-harbor-invitational-tennis.org.' || Name=='www.stone-harbor-invitational-tennis.org.']"
 ```
 
@@ -268,13 +268,13 @@ Order after merging:
    definition** and its outputs. (No migrate step in `deploy.yml` any more.)
 3. **`cdk deploy DatabaseStack`** (laptop) — `publiclyAccessible: false` +
    a CDK-managed SG admitting 5432 only from `db:appSecurityGroupId`
-   (`sg-0827a63415fdba069`, the `ServiceSecurityGroupId` output). Approve the
+   (`sg-XXXXXXXX`, the `ServiceSecurityGroupId` output). Approve the
    security prompt. This is an **online modify** — a few seconds' connection
    reset, no replacement. Prisma reconnects.
 4. Verify the site still loads. The RDS DNS name now resolves to the private
    IP (from in-VPC); the app reaches it through the SG.
 
-`db:securityGroupId` (the old `0.0.0.0/0` SG, `sg-00ad52e709e351b65`) is no
+`db:securityGroupId` (the old `0.0.0.0/0` SG) is no
 longer used — B5 deletes it.
 
 ### Migrations, from here on
@@ -306,7 +306,7 @@ tunnel through a bastion (not set up — add if you need it).
 Only once the Fargate app has been stable for a week or two.
 
 1. **`*` wildcard record** — Route 53 → the zone → delete the `*` record (it
-   points at Amplify's CloudFront `d2dqxtu5y326f4.cloudfront.net`, which is
+   points at Amplify's CloudFront distribution (`<id>.cloudfront.net`), which is
    about to disappear). apex / www / new. are all explicit records and
    unaffected.
 2. **Amplify app** — Amplify console → the app → **App settings → General →
@@ -314,7 +314,7 @@ Only once the Fargate app has been stable for a week or two.
    `curl -sI https://stone-harbor-invitational-tennis.org` should still be
    200. If Amplify's teardown removed either record, run
    `cdk deploy AppStack` — `deleteExisting` recreates them.
-3. **Old RDS security group** — delete `sg-00ad52e709e351b65` (the old
+3. **Old RDS security group** — delete it (the old
    `0.0.0.0/0` one). It's been unattached since B4.
 4. **Stale ACM validation CNAMEs** — Route 53 may still have `_...acm-validations`
    records for Amplify's old cert. Harmless; delete for tidiness.
@@ -356,7 +356,7 @@ GitHub variables: `DB_MASTER_SECRET_ARN` (the full ARN of `rds/master`) and
    ```bash
    aws secretsmanager create-secret --region us-east-2 \
      --name stone-harbor-tennis/app/app-database-url \
-     --secret-string 'postgresql://tennis_app:<PW>@tennis.crqqgwm0ikee.us-east-2.rds.amazonaws.com:5432/postgres'
+     --secret-string 'postgresql://tennis_app:<PW>@tennis.<...>.us-east-2.rds.amazonaws.com:5432/postgres'
    ```
 
    Add its ARN as the GitHub variable **`APP_DATABASE_URL_SECRET_ARN`**.
