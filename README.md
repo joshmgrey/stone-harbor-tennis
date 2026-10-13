@@ -2,6 +2,13 @@
 
 A scheduling and signup site for a recreational doubles tennis league in Stone Harbor, NJ.
 
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Home page: upcoming sessions with courts, times and spots left" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/session.png" alt="Session page: generated court assignments, alternate signup form and the roster" width="300">
+</p>
+<p align="center"><sub>Home page (left) and a full session with generated pairings (right), on a phone-width viewport. Sample data.</sub></p>
+
 ---
 
 ## Problem Statement
