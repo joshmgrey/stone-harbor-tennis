@@ -165,8 +165,32 @@ mocked at the module boundary.
 | Session capacity math | [`src/lib/session.test.ts`](src/lib/session.test.ts) |
 | Admin token / cookie logic | [`src/lib/auth.test.ts`](src/lib/auth.test.ts) |
 | Pairing algorithm (shuffle, court split, sit-outs) | [`src/lib/pairings.test.ts`](src/lib/pairings.test.ts) |
-| `sessions` route handler | [`src/app/api/sessions/route.test.ts`](src/app/api/sessions/route.test.ts) |
+| Admin login / auth check routes | [`src/app/api/auth/route.test.ts`](src/app/api/auth/route.test.ts), [`src/app/api/auth/check/route.test.ts`](src/app/api/auth/check/route.test.ts) |
+| `sessions` route handlers | [`src/app/api/sessions/route.test.ts`](src/app/api/sessions/route.test.ts), [`src/app/api/sessions/[id]/route.test.ts`](src/app/api/sessions/[id]/route.test.ts) |
+| `signups` route handlers | [`src/app/api/sessions/[id]/signups/route.test.ts`](src/app/api/sessions/[id]/signups/route.test.ts), [`src/app/api/sessions/[id]/signups/[signupId]/route.test.ts`](src/app/api/sessions/[id]/signups/[signupId]/route.test.ts) |
 | `pairings` route handler | [`src/app/api/sessions/[id]/pairings/route.test.ts`](src/app/api/sessions/[id]/pairings/route.test.ts) |
+| `players`, `calendar` (iCal), `health` routes | [`src/app/api/players/route.test.ts`](src/app/api/players/route.test.ts), [`src/app/api/calendar/route.test.ts`](src/app/api/calendar/route.test.ts), [`src/app/api/health/route.test.ts`](src/app/api/health/route.test.ts) |
+
+### Test and coverage numbers
+
+As of 2026-10-12 (`main` @ `edd116c`), all passing:
+
+| Suite | Files | Tests |
+|---|---|---|
+| Unit (`npm test`) | 13 | 73 |
+| Infra CDK (`cd infra && npm test`) | 3 | 28 |
+| End-to-end (`npm run e2e`) | 1 | 1 full happy path |
+
+Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
+
+| Statements | Branches | Functions | Lines |
+|---|---|---|---|
+| 93.9% (138/147) | 83.6% (56/67) | 96.7% (29/30) | 93.7% (134/143) |
+
+Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
+client singleton, which every test mocks out. It's covered end to end instead.
+Every other file is at 100% lines except `sessions/[id]/signups/route.ts`
+(96%, one uncovered line).
 
 The Fisher-Yates shuffle and court-splitting logic lives in
 [`src/lib/pairings.ts`](src/lib/pairings.ts) as pure, seedable functions so it
