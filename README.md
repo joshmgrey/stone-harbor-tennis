@@ -182,7 +182,7 @@ mocked at the module boundary.
 
 ### Test and coverage numbers
 
-As of 2026-11-16 (`feat/plpgsql-register-signup`, branched from `main` @ `40a9d4b`), all passing:
+As of 2026-11-16 (`main` after PR #60), all passing:
 
 | Suite | Files | Tests |
 |---|---|---|
