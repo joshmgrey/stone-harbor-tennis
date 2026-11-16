@@ -39,6 +39,8 @@ export default function AdminSessionPage() {
   const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
   const [phoneDraft, setPhoneDraft] = useState("");
   const [phoneError, setPhoneError] = useState("");
+  // Last failed remove/move, shown above the player lists.
+  const [signupError, setSignupError] = useState("");
 
   const load = useCallback(async () => {
     const [detailRes, pairingsRes] = await Promise.all([
@@ -85,22 +87,44 @@ export default function AdminSessionPage() {
     }
   }
 
-  async function handleRemoveSignup(signupId: number) {
+  /**
+   * Run a signup change (remove / move), report a failure instead of
+   * swallowing it, always re-enable the row, and reload so the list matches
+   * the server (e.g. a signup already removed in another tab disappears).
+   */
+  async function runSignupAction(signupId: number, init: RequestInit, failMessage: string) {
     setBusyId(signupId);
-    await fetch(`/api/sessions/${id}/signups/${signupId}`, { method: "DELETE" });
-    setBusyId(null);
+    setSignupError("");
+    try {
+      const res = await fetch(`/api/sessions/${id}/signups/${signupId}`, init);
+      if (res.status === 404) {
+        setSignupError("That signup no longer exists — the list has been refreshed.");
+      } else if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSignupError(data.error ?? failMessage);
+      }
+    } catch {
+      setSignupError("Couldn't reach the server — nothing was changed.");
+    } finally {
+      setBusyId(null);
+    }
     load();
   }
 
-  async function handleToggleAlternate(signupId: number, makeAlternate: boolean) {
-    setBusyId(signupId);
-    await fetch(`/api/sessions/${id}/signups/${signupId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_alternate: makeAlternate }),
-    });
-    setBusyId(null);
-    load();
+  function handleRemoveSignup(signupId: number) {
+    return runSignupAction(signupId, { method: "DELETE" }, "Couldn't remove the player");
+  }
+
+  function handleToggleAlternate(signupId: number, makeAlternate: boolean) {
+    return runSignupAction(
+      signupId,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_alternate: makeAlternate }),
+      },
+      "Couldn't move the player"
+    );
   }
 
   function startEditingPhone(s: Signup) {
@@ -347,6 +371,11 @@ export default function AdminSessionPage() {
 
       {/* Signups */}
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+        {signupError && (
+          <p role="alert" className="mb-4 text-sm text-red-600">
+            {signupError}
+          </p>
+        )}
         <h2 className="text-lg font-bold text-gray-800 mb-4">
           Playing ({regulars.length} / {seats})
         </h2>

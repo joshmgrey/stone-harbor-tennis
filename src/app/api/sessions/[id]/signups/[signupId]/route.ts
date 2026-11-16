@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/auth";
 import { parseId } from "@/lib/params";
@@ -60,10 +61,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     );
   }
 
-  const where = { id: ids.signupId, session_id: ids.sessionId };
-  const { count } = await prisma.signup.updateMany({ where, data: { is_alternate } });
-  if (count === 0) return notFound();
-
-  const signup = await prisma.signup.findFirst({ where, include: { player: true } });
-  return NextResponse.json(signup);
+  // One atomic update that also returns the row. The extra session_id filter
+  // scopes it to the URL's session; no match (gone, or another session's
+  // signup) throws P2025, which is a 404.
+  try {
+    const signup = await prisma.signup.update({
+      where: { id: ids.signupId, session_id: ids.sessionId },
+      data: { is_alternate },
+      include: { player: true },
+    });
+    return NextResponse.json(signup);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      return notFound();
+    }
+    throw err;
+  }
 }
