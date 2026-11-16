@@ -2,19 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 const findUnique = vi.fn();
-const upsert = vi.fn();
 const queryRaw = vi.fn();
-const signupFindUnique = vi.fn();
 
-// The duplicate check, capacity check and insert run inside the
-// `register_signup` PL/pgSQL function, called via `prisma.$queryRaw`. These
-// tests mock its result row; the locking itself is exercised against a real
-// Postgres by scripts/load-test-signup.js and the CI e2e job.
+// The player upsert, duplicate check, capacity check and insert run inside
+// the `register_signup` PL/pgSQL function, called via `prisma.$queryRaw`.
+// These tests mock its result row; the function itself (locking included) is
+// tested against a real Postgres in src/db/register-signup.integration.test.ts.
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     session: { findUnique: (a: unknown) => findUnique(a) },
-    player: { upsert: (a: unknown) => upsert(a) },
-    signup: { findUnique: (a: unknown) => signupFindUnique(a) },
     $queryRaw: (...a: unknown[]) => queryRaw(...a),
   },
 }));
@@ -30,36 +26,59 @@ const jsonRequest = (body: unknown) =>
     body: JSON.stringify(body),
   }) as unknown as NextRequest;
 
+// A 2-court session (capacity 8).
 const session = { id: 1, courts: 2 };
 
-/** Make register_signup report `status` (and a signup id when created). */
-const registerReturns = (status: string, signup_id: number | null = null) =>
-  queryRaw.mockResolvedValue([{ status, signup_id }]);
+const signedUpAt = new Date("2026-11-16T19:00:00.000Z");
+const playerCreatedAt = new Date("2026-11-01T12:00:00.000Z");
+
+const createdRow = {
+  status: "created",
+  signup_id: 99,
+  is_alternate: false,
+  signed_up_at: signedUpAt,
+  player_id: 10,
+  player_name: "Alice",
+  player_created_at: playerCreatedAt,
+};
+
+/** Make register_signup report a non-created status. */
+const registerReturns = (status: string) =>
+  queryRaw.mockResolvedValue([
+    {
+      status,
+      signup_id: null,
+      is_alternate: null,
+      signed_up_at: null,
+      player_id: null,
+      player_name: null,
+      player_created_at: null,
+    },
+  ]);
 
 /** The interpolated values passed to the register_signup tagged template. */
 const registerArgs = () => queryRaw.mock.calls[0].slice(1);
 
 beforeEach(() => {
   findUnique.mockReset().mockResolvedValue(session);
-  upsert.mockReset().mockResolvedValue({ id: 10 });
-  queryRaw.mockReset();
-  registerReturns("created", 99);
-  signupFindUnique
-    .mockReset()
-    .mockImplementation((a) => ({ id: a.where.id, session_id: 1, player_id: 10 }));
+  queryRaw.mockReset().mockResolvedValue([createdRow]);
 });
 
 describe("POST /api/sessions/:id/signups", () => {
-  it("creates a signup on the happy path and returns 201", async () => {
+  it("creates a signup on the happy path and returns 201 with public fields", async () => {
     const res = await POST(jsonRequest({ name: "Alice", phone: "555-1212" }), ctx("1"));
     expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ id: 99 });
+    expect(await res.json()).toEqual({
+      id: 99,
+      session_id: 1,
+      player_id: 10,
+      is_alternate: false,
+      signed_up_at: signedUpAt.toISOString(),
+      player: { id: 10, name: "Alice", created_at: playerCreatedAt.toISOString() },
+    });
 
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: "Alice" } })
-    );
-    // session id, player id, alternate flag, players per court
-    expect(registerArgs()).toEqual([1, 10, false, 4]);
+    // session id, name, phone, alternate flag, capacity (2 courts * 4)
+    expect(registerArgs()).toEqual([1, "Alice", "555-1212", false, 8]);
   });
 
   it("calls the register_signup function", async () => {
@@ -71,34 +90,22 @@ describe("POST /api/sessions/:id/signups", () => {
 
   it("passes the alternate flag through", async () => {
     await POST(jsonRequest({ name: "Alice", is_alternate: true }), ctx("1"));
-    expect(registerArgs()[2]).toBe(true);
+    expect(registerArgs()[3]).toBe(true);
   });
 
   it("treats a non-boolean is_alternate as false", async () => {
     await POST(jsonRequest({ name: "Alice", is_alternate: "yes" }), ctx("1"));
-    expect(registerArgs()[2]).toBe(false);
+    expect(registerArgs()[3]).toBe(false);
   });
 
-  it("does not return the player's phone number", async () => {
-    await POST(jsonRequest({ name: "Alice" }), ctx("1"));
-
-    expect(signupFindUnique).toHaveBeenCalledWith({
-      where: { id: 99 },
-      include: {
-        player: { select: { id: true, name: true, created_at: true } },
-      },
-    });
+  it("does not return a phone number", async () => {
+    const res = await POST(jsonRequest({ name: "Alice", phone: "555-1212" }), ctx("1"));
+    expect(JSON.stringify(await res.json())).not.toMatch(/phone|555-1212/);
   });
 
   it("trims the name and normalizes a blank phone to null", async () => {
     await POST(jsonRequest({ name: "  Bob  ", phone: "   " }), ctx("1"));
-
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { name: "Bob" },
-        create: { name: "Bob", phone: null },
-      })
-    );
+    expect(registerArgs().slice(1, 3)).toEqual(["Bob", null]);
   });
 
   it("rejects a missing/blank name with 400 before hitting the database", async () => {
@@ -108,12 +115,11 @@ describe("POST /api/sessions/:id/signups", () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 
-  it("returns 404 without creating a player when the session does not exist", async () => {
+  it("returns 404 without registering when the session does not exist", async () => {
     findUnique.mockResolvedValue(null);
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("999"));
     expect(res.status).toBe(404);
-    expect(upsert).not.toHaveBeenCalled();
     expect(queryRaw).not.toHaveBeenCalled();
   });
 
@@ -122,7 +128,6 @@ describe("POST /api/sessions/:id/signups", () => {
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(404);
-    expect(signupFindUnique).not.toHaveBeenCalled();
   });
 
   it("returns 409 when the player is already signed up to play", async () => {
@@ -133,7 +138,6 @@ describe("POST /api/sessions/:id/signups", () => {
     expect(await res.json()).toEqual({
       error: "You're already signed up to play this session.",
     });
-    expect(signupFindUnique).not.toHaveBeenCalled();
   });
 
   it("returns 409 with the alternate-list message on a duplicate alternate signup", async () => {
@@ -150,6 +154,13 @@ describe("POST /api/sessions/:id/signups", () => {
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/full/);
-    expect(signupFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly if register_signup returns no row", async () => {
+    queryRaw.mockResolvedValue([]);
+
+    await expect(POST(jsonRequest({ name: "Alice" }), ctx("1"))).rejects.toThrow(
+      /returned no row/
+    );
   });
 });

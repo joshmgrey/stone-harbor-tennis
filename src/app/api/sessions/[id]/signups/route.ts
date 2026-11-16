@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { PLAYERS_PER_COURT } from "@/lib/session";
-import { publicPlayerSelect } from "@/lib/player";
+import { capacity } from "@/lib/session";
 
 /** Outcome reported by the `register_signup` PL/pgSQL function. */
 type RegisterStatus =
@@ -11,7 +10,16 @@ type RegisterStatus =
   | "already_alternate"
   | "full";
 
-type RegisterResult = { status: RegisterStatus; signup_id: number | null };
+/** One row from register_signup; everything but status is null unless created. */
+type RegisterResult = {
+  status: RegisterStatus;
+  signup_id: number | null;
+  is_alternate: boolean | null;
+  signed_up_at: Date | null;
+  player_id: number | null;
+  player_name: string | null;
+  player_created_at: Date | null;
+};
 
 const CONFLICT_MESSAGES: Partial<Record<RegisterStatus, string>> = {
   // This form is unauthenticated, so a name that's already on the list can't
@@ -36,8 +44,7 @@ export async function POST(
   }
 
   const sessionId = Number(id);
-  // Checked up front so a bad session id doesn't create a player row.
-  // register_signup re-checks under the row lock.
+  // Read for capacity(); register_signup re-checks existence under the lock.
   const session = await prisma.session.findUnique({ where: { id: sessionId } });
 
   if (!session) {
@@ -47,26 +54,28 @@ export async function POST(
   const trimmedName = name.trim();
   const trimmedPhone = phone?.trim() || null;
 
-  const player = await prisma.player.upsert({
-    where: { name: trimmedName },
-    create: { name: trimmedName, phone: trimmedPhone },
-    update: { phone: trimmedPhone ?? undefined },
-  });
-
-  // The duplicate check, capacity check and insert have to be atomic. Without
-  // that, two requests racing for the last open spot both read the pre-insert
-  // count, both pass, and both insert — putting the session over capacity.
-  // register_signup (prisma/migrations/*_add_register_signup_function) does
-  // all three in one statement after locking the session row with
-  // `SELECT ... FOR UPDATE`, so concurrent signups for a session serialize.
-  const [result] = await prisma.$queryRaw<RegisterResult[]>`
-    SELECT status, signup_id
+  // The player upsert, duplicate check, capacity check and insert have to be
+  // atomic. Without that, two requests racing for the last open spot both
+  // read the pre-insert count, both pass, and both insert — putting the
+  // session over capacity. register_signup
+  // (prisma/migrations/*_add_register_signup_function) does all of it in one
+  // statement after locking the session row with `SELECT ... FOR UPDATE`, so
+  // concurrent signups for a session serialize. It never overwrites a phone
+  // already on file.
+  const rows = await prisma.$queryRaw<RegisterResult[]>`
+    SELECT *
     FROM register_signup(
       ${sessionId}::integer,
-      ${player.id}::integer,
+      ${trimmedName}::text,
+      ${trimmedPhone}::text,
       ${asAlternate}::boolean,
-      ${PLAYERS_PER_COURT}::integer
+      ${capacity(session)}::integer
     )`;
+
+  const result = rows[0];
+  if (!result) {
+    throw new Error("register_signup returned no row");
+  }
 
   if (result.status === "not_found") {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -77,12 +86,21 @@ export async function POST(
     return NextResponse.json({ error: conflict }, { status: 409 });
   }
 
-  const signup = await prisma.signup.findUnique({
-    where: { id: result.signup_id! },
-    // Public response: no phone. Signing up under an existing name must
-    // not reveal the number already on file for it.
-    include: { player: { select: publicPlayerSelect } },
-  });
-
-  return NextResponse.json(signup, { status: 201 });
+  // Public response: no phone. Signing up under an existing name must not
+  // reveal the number already on file for it.
+  return NextResponse.json(
+    {
+      id: result.signup_id,
+      session_id: sessionId,
+      player_id: result.player_id,
+      is_alternate: result.is_alternate,
+      signed_up_at: result.signed_up_at,
+      player: {
+        id: result.player_id,
+        name: result.player_name,
+        created_at: result.player_created_at,
+      },
+    },
+    { status: 201 }
+  );
 }

@@ -184,7 +184,8 @@ As of 2026-11-16 (`feat/plpgsql-register-signup`, branched from `main` @ `40a9d4
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 13 | 78 |
+| Unit (`npm test`) | 13 | 79 |
+| DB integration (`INTEGRATION_DATABASE_URL=... npx vitest run src/db`) | 1 | 6 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
 
@@ -192,13 +193,16 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 94.4% (134/142) | 84.1% (53/63) | 96.6% (28/29) | 94.2% (130/138) |
+| 94.4% (135/143) | 84.1% (53/63) | 96.6% (28/29) | 94.2% (131/139) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.
-Every other file is at 100% lines. The signup capacity logic itself lives in
-the `register_signup` PL/pgSQL function (a migration), which unit tests mock;
-`scripts/load-test-signup.js` exercises it against a real Postgres.
+Every other file is at 100% lines. The public signup logic itself lives in
+the `register_signup` PL/pgSQL function (a migration), which unit tests mock.
+[`src/db/register-signup.integration.test.ts`](src/db/register-signup.integration.test.ts)
+tests it against a real Postgres (row lock, 20-way race, duplicates, phone
+handling); it's skipped unless `INTEGRATION_DATABASE_URL` is set, and CI's
+e2e job runs it as the app role.
 
 These are enforced: [`vitest.config.mts`](vitest.config.mts) sets coverage
 thresholds of 91% statements, 81% branches, 94% functions and 91% lines (about
