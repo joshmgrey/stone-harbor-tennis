@@ -9,10 +9,11 @@
 -- until the calling statement's transaction commits, so the next waiter's
 -- count sees this insert.
 --
--- Player upsert: INSERT ... ON CONFLICT, so two first-time signups under the
--- same new name can't race into a unique violation. The form is
--- unauthenticated, so it never overwrites a phone already on file; it only
--- fills one in when the player has none.
+-- Player lookup: INSERT ... ON CONFLICT DO NOTHING, so two first-time signups
+-- under the same new name can't race into a unique violation. The form is
+-- unauthenticated, so an existing player's record is never changed by a
+-- rejected request: a phone is only filled in (never overwritten) once the
+-- signup has actually been created.
 --
 -- Returns one row. status is one of
 --   'created'           the remaining columns describe the new signup
@@ -24,8 +25,10 @@
 -- HTTP responses without parsing driver error codes. Only public player
 -- fields are returned (never the phone).
 --
--- p_capacity comes from capacity() in src/lib/session.ts, the single source
--- of the capacity rule.
+-- Capacity is courts * p_players_per_court, with courts read under the lock
+-- so a concurrent change to a session's courts is respected. This mirrors
+-- capacity() in src/lib/session.ts (used for display); the caller passes
+-- PLAYERS_PER_COURT from there so the constant lives in one place.
 --
 -- Additive: the running app doesn't call this until the new code deploys.
 -- SECURITY INVOKER (the default), so it runs with the app role's existing
@@ -34,8 +37,8 @@ CREATE OR REPLACE FUNCTION register_signup(
   p_session_id   integer,
   p_name         text,
   p_phone        text,
-  p_is_alternate boolean,
-  p_capacity     integer
+  p_is_alternate      boolean,
+  p_players_per_court integer
 )
 RETURNS TABLE (
   status            text,
@@ -50,12 +53,13 @@ LANGUAGE plpgsql
 AS $$
 #variable_conflict use_column
 DECLARE
+  v_courts             integer;
   v_player             players%ROWTYPE;
   v_signup             signups%ROWTYPE;
   v_existing_alternate boolean;
   v_taken              integer;
 BEGIN
-  PERFORM 1 FROM sessions s WHERE s.id = p_session_id FOR UPDATE;
+  SELECT s.courts INTO v_courts FROM sessions s WHERE s.id = p_session_id FOR UPDATE;
 
   IF NOT FOUND THEN
     status := 'not_found';
@@ -63,10 +67,16 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO players AS p (name, phone)
+  INSERT INTO players (name, phone)
   VALUES (p_name, p_phone)
-  ON CONFLICT (name) DO UPDATE SET phone = COALESCE(p.phone, EXCLUDED.phone)
+  ON CONFLICT (name) DO NOTHING
   RETURNING * INTO v_player;
+
+  IF NOT FOUND THEN
+    -- Already exists (possibly just committed by a concurrent request; this
+    -- statement gets a fresh snapshot, so it sees that row).
+    SELECT * INTO v_player FROM players p WHERE p.name = p_name;
+  END IF;
 
   SELECT su.is_alternate INTO v_existing_alternate
   FROM signups su
@@ -84,7 +94,7 @@ BEGIN
     FROM signups su
     WHERE su.session_id = p_session_id AND NOT su.is_alternate;
 
-    IF v_taken >= p_capacity THEN
+    IF v_taken >= v_courts * p_players_per_court THEN
       status := 'full';
       RETURN NEXT;
       RETURN;
@@ -94,6 +104,10 @@ BEGIN
   INSERT INTO signups (session_id, player_id, is_alternate)
   VALUES (p_session_id, v_player.id, p_is_alternate)
   RETURNING * INTO v_signup;
+
+  IF v_player.phone IS NULL AND p_phone IS NOT NULL THEN
+    UPDATE players SET phone = p_phone WHERE id = v_player.id AND phone IS NULL;
+  END IF;
 
   status            := 'created';
   signup_id         := v_signup.id;

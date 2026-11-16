@@ -4,11 +4,14 @@
 // an off-by-one in the capacity check).
 //
 // Skipped unless INTEGRATION_DATABASE_URL is set. CI's e2e job sets it to the
-// least-privilege app role, so this also proves that role can run it.
+// least-privilege app role, so this also proves that role can run it. It only
+// deletes the sessions and players it created itself.
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const url = process.env.INTEGRATION_DATABASE_URL;
+
+const PLAYERS_PER_COURT = 4;
 
 type Row = {
   status: string;
@@ -21,33 +24,47 @@ describe.skipIf(!url)("register_signup (real Postgres)", () => {
   // Concurrency needs real parallel connections, not one serialized client.
   let pool: pg.Pool;
   let sessionId: number;
+  const createdSessions: number[] = [];
   const prefix = `it-${process.pid}-${Date.now()}`;
   const nameOf = (n: string | number) => `${prefix} ${n}`;
+
+  const newSession = async (courts = 1) => {
+    const { rows } = await pool.query<{ id: number }>(
+      `INSERT INTO sessions (date, start_time, end_time, courts)
+       VALUES ('2099-01-01', '18:00', '20:00', $1) RETURNING id`,
+      [courts]
+    );
+    createdSessions.push(rows[0].id);
+    return rows[0].id;
+  };
 
   const register = async (
     session: number,
     name: string,
-    opts: {
-      phone?: string | null;
-      alternate?: boolean;
-      capacity?: number;
-      db?: pg.Pool | pg.PoolClient;
-    } = {}
+    opts: { phone?: string | null; alternate?: boolean; db?: pg.Pool | pg.PoolClient } = {}
   ): Promise<Row> => {
     const { rows } = await (opts.db ?? pool).query<Row>(
       "SELECT * FROM register_signup($1, $2, $3, $4, $5)",
-      [session, name, opts.phone ?? null, opts.alternate ?? false, opts.capacity ?? 4]
+      [session, name, opts.phone ?? null, opts.alternate ?? false, PLAYERS_PER_COURT]
     );
     expect(rows).toHaveLength(1);
     return rows[0];
   };
 
-  const regularCount = async () => {
+  const regularCount = async (session = sessionId) => {
     const { rows } = await pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM signups WHERE session_id = $1 AND NOT is_alternate",
-      [sessionId]
+      [session]
     );
     return rows[0].n;
+  };
+
+  const phoneOf = async (name: string) => {
+    const { rows } = await pool.query<{ phone: string | null }>(
+      "SELECT phone FROM players WHERE name = $1",
+      [name]
+    );
+    return rows[0]?.phone;
   };
 
   beforeAll(() => {
@@ -55,18 +72,13 @@ describe.skipIf(!url)("register_signup (real Postgres)", () => {
   });
 
   beforeEach(async () => {
-    const { rows } = await pool.query<{ id: number }>(
-      `INSERT INTO sessions (date, start_time, end_time, courts)
-       VALUES ('2099-01-01', '18:00', '20:00', 1) RETURNING id`
-    );
-    sessionId = rows[0].id;
+    sessionId = await newSession(); // 1 court: capacity 4
   });
 
   afterAll(async () => {
     if (!pool) return;
-    await pool.query(
-      "DELETE FROM sessions WHERE date = '2099-01-01'"
-    );
+    // Signups cascade with their sessions.
+    await pool.query("DELETE FROM sessions WHERE id = ANY($1)", [createdSessions]);
     await pool.query("DELETE FROM players WHERE name LIKE $1", [`${prefix}%`]);
     await pool.end();
   });
@@ -85,12 +97,27 @@ describe.skipIf(!url)("register_signup (real Postgres)", () => {
       const b = register(sessionId, nameOf("B")).finally(() => {
         bDone = true;
       });
-      await new Promise((r) => setTimeout(r, 300));
-      expect(bDone).toBe(false); // blocked on A's session-row lock
+
+      // Wait until B is either finished or observed blocked on a lock in
+      // Postgres, rather than guessing with a fixed delay.
+      const deadline = Date.now() + 10_000;
+      let bBlocked = false;
+      while (!bDone && !bBlocked && Date.now() < deadline) {
+        const { rows } = await pool.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE wait_event_type = 'Lock' AND query LIKE '%register_signup%'`
+        );
+        bBlocked = rows[0].n > 0;
+        if (!bBlocked) await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(bDone).toBe(false); // finished without waiting: no lock
+      expect(bBlocked).toBe(true);
 
       await a.query("COMMIT");
       expect((await b).status).toBe("full");
     } finally {
+      // On an early failure, release A's lock so B (and the run) don't hang.
+      await a.query("ROLLBACK").catch(() => {});
       a.release();
     }
     expect(await regularCount()).toBe(4);
@@ -124,29 +151,41 @@ describe.skipIf(!url)("register_signup (real Postgres)", () => {
     expect((await register(sessionId, nameOf("full 1"))).status).toBe("already_playing");
   });
 
+  it("uses the session's current courts, read under the lock", async () => {
+    const twoCourts = await newSession(2); // capacity 8
+    for (let i = 1; i <= 4; i++) await register(twoCourts, nameOf(`courts ${i}`));
+
+    await pool.query("UPDATE sessions SET courts = 1 WHERE id = $1", [twoCourts]);
+
+    expect((await register(twoCourts, nameOf("courts 5"))).status).toBe("full");
+    expect(await regularCount(twoCourts)).toBe(4);
+  });
+
   it("returns not_found for a missing session", async () => {
     expect((await register(-1, nameOf("ghost"))).status).toBe("not_found");
   });
 
-  it("never overwrites a phone already on file, but fills a missing one", async () => {
+  it("never overwrites a phone, and only fills a missing one on a successful signup", async () => {
+    // Existing phone survives a rejected (duplicate) request with another number.
     await register(sessionId, nameOf("phone"), { phone: "555-0001" });
-    await register(sessionId, nameOf("phone"), { phone: "555-9999" }); // already_playing
+    await register(sessionId, nameOf("phone"), { phone: "555-9999" });
+    expect(await phoneOf(nameOf("phone"))).toBe("555-0001");
+
+    // A rejected request can't attach a phone to a player who has none...
     await register(sessionId, nameOf("nophone"));
     await register(sessionId, nameOf("nophone"), { phone: "555-0002" });
+    expect(await phoneOf(nameOf("nophone"))).toBeNull();
 
-    const { rows } = await pool.query<{ name: string; phone: string | null }>(
-      "SELECT name, phone FROM players WHERE name = ANY($1) ORDER BY name",
-      [[nameOf("nophone"), nameOf("phone")]]
+    // ...but their own successful signup elsewhere fills it in.
+    const other = await newSession();
+    expect((await register(other, nameOf("nophone"), { phone: "555-0003" })).status).toBe(
+      "created"
     );
-    expect(rows.map((r) => r.phone)).toEqual(["555-0002", "555-0001"]);
+    expect(await phoneOf(nameOf("nophone"))).toBe("555-0003");
   });
 
   it("handles concurrent first signups under one new name without a unique violation", async () => {
-    const { rows } = await pool.query<{ id: number }>(
-      `INSERT INTO sessions (date, start_time, end_time, courts)
-       VALUES ('2099-01-01', '18:00', '20:00', 1) RETURNING id`
-    );
-    const other = rows[0].id;
+    const other = await newSession();
 
     const results = await Promise.all([
       register(sessionId, nameOf("twin")),

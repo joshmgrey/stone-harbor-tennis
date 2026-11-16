@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Signup } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { capacity } from "@/lib/session";
+import { PLAYERS_PER_COURT } from "@/lib/session";
+import { publicPlayerSelect } from "@/lib/player";
+
+/** Largest value a Postgres `integer` (sessions.id) can hold. */
+const PG_INT_MAX = 2_147_483_647;
 
 /** Outcome reported by the `register_signup` PL/pgSQL function. */
 type RegisterStatus =
@@ -39,15 +44,15 @@ export async function POST(
   const { name, phone, is_alternate } = await req.json();
   const asAlternate = is_alternate === true;
 
-  if (!name?.trim()) {
+  if (typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  }
+  if (phone != null && typeof phone !== "string") {
+    return NextResponse.json({ error: "Phone must be text" }, { status: 400 });
   }
 
   const sessionId = Number(id);
-  // Read for capacity(); register_signup re-checks existence under the lock.
-  const session = await prisma.session.findUnique({ where: { id: sessionId } });
-
-  if (!session) {
+  if (!Number.isInteger(sessionId) || sessionId < 1 || sessionId > PG_INT_MAX) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
@@ -60,8 +65,9 @@ export async function POST(
   // session over capacity. register_signup
   // (prisma/migrations/*_add_register_signup_function) does all of it in one
   // statement after locking the session row with `SELECT ... FOR UPDATE`, so
-  // concurrent signups for a session serialize. It never overwrites a phone
-  // already on file.
+  // concurrent signups for a session serialize. It reads the session's courts
+  // under that lock (404s via 'not_found' if it doesn't exist) and never
+  // changes an existing player's record on a rejected request.
   const rows = await prisma.$queryRaw<RegisterResult[]>`
     SELECT *
     FROM register_signup(
@@ -69,7 +75,7 @@ export async function POST(
       ${trimmedName}::text,
       ${trimmedPhone}::text,
       ${asAlternate}::boolean,
-      ${capacity(session)}::integer
+      ${PLAYERS_PER_COURT}::integer
     )`;
 
   const result = rows[0];
@@ -86,21 +92,23 @@ export async function POST(
     return NextResponse.json({ error: conflict }, { status: 409 });
   }
 
+  // Same shape as a Prisma signup with `include: { player: { select:
+  // publicPlayerSelect } }`; the `satisfies` checks fail to compile if the
+  // Signup model or publicPlayerSelect changes without this being updated.
   // Public response: no phone. Signing up under an existing name must not
   // reveal the number already on file for it.
-  return NextResponse.json(
-    {
-      id: result.signup_id,
-      session_id: sessionId,
-      player_id: result.player_id,
-      is_alternate: result.is_alternate,
-      signed_up_at: result.signed_up_at,
-      player: {
-        id: result.player_id,
-        name: result.player_name,
-        created_at: result.player_created_at,
-      },
-    },
-    { status: 201 }
-  );
+  const signup = {
+    id: result.signup_id!,
+    session_id: sessionId,
+    player_id: result.player_id!,
+    is_alternate: result.is_alternate!,
+    signed_up_at: result.signed_up_at!,
+  } satisfies Signup;
+  const player = {
+    id: result.player_id!,
+    name: result.player_name!,
+    created_at: result.player_created_at!,
+  } satisfies Record<keyof typeof publicPlayerSelect, unknown>;
+
+  return NextResponse.json({ ...signup, player }, { status: 201 });
 }

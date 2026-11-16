@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-const findUnique = vi.fn();
 const queryRaw = vi.fn();
 
 // The player upsert, duplicate check, capacity check and insert run inside
@@ -10,7 +9,6 @@ const queryRaw = vi.fn();
 // tested against a real Postgres in src/db/register-signup.integration.test.ts.
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    session: { findUnique: (a: unknown) => findUnique(a) },
     $queryRaw: (...a: unknown[]) => queryRaw(...a),
   },
 }));
@@ -25,9 +23,6 @@ const jsonRequest = (body: unknown) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   }) as unknown as NextRequest;
-
-// A 2-court session (capacity 8).
-const session = { id: 1, courts: 2 };
 
 const signedUpAt = new Date("2026-11-16T19:00:00.000Z");
 const playerCreatedAt = new Date("2026-11-01T12:00:00.000Z");
@@ -60,7 +55,6 @@ const registerReturns = (status: string) =>
 const registerArgs = () => queryRaw.mock.calls[0].slice(1);
 
 beforeEach(() => {
-  findUnique.mockReset().mockResolvedValue(session);
   queryRaw.mockReset().mockResolvedValue([createdRow]);
 });
 
@@ -77,8 +71,8 @@ describe("POST /api/sessions/:id/signups", () => {
       player: { id: 10, name: "Alice", created_at: playerCreatedAt.toISOString() },
     });
 
-    // session id, name, phone, alternate flag, capacity (2 courts * 4)
-    expect(registerArgs()).toEqual([1, "Alice", "555-1212", false, 8]);
+    // session id, name, phone, alternate flag, players per court
+    expect(registerArgs()).toEqual([1, "Alice", "555-1212", false, 4]);
   });
 
   it("calls the register_signup function", async () => {
@@ -112,18 +106,35 @@ describe("POST /api/sessions/:id/signups", () => {
     const res = await POST(jsonRequest({ name: "   " }), ctx("1"));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Name is required" });
-    expect(findUnique).not.toHaveBeenCalled();
-  });
-
-  it("returns 404 without registering when the session does not exist", async () => {
-    findUnique.mockResolvedValue(null);
-
-    const res = await POST(jsonRequest({ name: "Alice" }), ctx("999"));
-    expect(res.status).toBe(404);
     expect(queryRaw).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when the session is deleted before the signup locks it", async () => {
+  it.each([123, null, { first: "Alice" }])(
+    "rejects a non-string name (%j) with 400",
+    async (name) => {
+      const res = await POST(jsonRequest({ name }), ctx("1"));
+      expect(res.status).toBe(400);
+      expect(queryRaw).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects a non-string phone with 400", async () => {
+    const res = await POST(jsonRequest({ name: "Alice", phone: 5551212 }), ctx("1"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Phone must be text" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it.each(["abc", "1.5", "0", "-3", "2147483648"])(
+    "returns 404 for an invalid session id (%s) without querying",
+    async (id) => {
+      const res = await POST(jsonRequest({ name: "Alice" }), ctx(id));
+      expect(res.status).toBe(404);
+      expect(queryRaw).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns 404 when the session does not exist", async () => {
     registerReturns("not_found");
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
