@@ -72,6 +72,7 @@ export default function AdminSessionPage() {
 
   async function handleGeneratePairings() {
     setPairingError("");
+    setSignupError(""); // a new action; don't leave an old remove/move error up
     setGenerating(true);
     try {
       const res = await fetch(`/api/sessions/${id}/pairings`, { method: "POST" });
@@ -108,7 +109,9 @@ export default function AdminSessionPage() {
     } finally {
       setBusyId(null);
     }
-    load();
+    // Refresh the list. If the server is unreachable this fails too; the
+    // error above already says so, so don't add an unhandled rejection.
+    load().catch(() => {});
   }
 
   function handleRemoveSignup(signupId: number) {
@@ -131,6 +134,7 @@ export default function AdminSessionPage() {
     setEditingPlayerId(s.player.id);
     setPhoneDraft(s.player.phone ?? "");
     setPhoneError("");
+    setSignupError(""); // a new action; don't leave an old remove/move error up
   }
 
   async function handleSavePhone(signupId: number, playerId: number) {
@@ -148,7 +152,7 @@ export default function AdminSessionPage() {
         return;
       }
       setEditingPlayerId(null);
-      load();
+      load().catch(() => {}); // saved; a failed refresh just leaves the old list up
     } catch {
       // fetch itself rejected (offline, server restarting): nothing was saved.
       setPhoneError("Couldn't reach the server — not saved");
