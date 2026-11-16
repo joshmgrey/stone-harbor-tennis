@@ -127,3 +127,19 @@ describe("POST /api/sessions/:id/pairings", () => {
     }
   });
 });
+
+describe("malformed session ids", () => {
+  it("GET returns 404 without querying", async () => {
+    const res = await GET(req, ctx("0x10"));
+    expect(res.status).toBe(404);
+    expect(pairingFindMany).not.toHaveBeenCalled();
+  });
+
+  it("POST returns 404 without querying", async () => {
+    isAdmin.mockResolvedValue(true);
+    const res = await POST(req, ctx("abc"));
+    expect(res.status).toBe(404);
+    expect(findMany).not.toHaveBeenCalled();
+    expect($transaction).not.toHaveBeenCalled();
+  });
+});

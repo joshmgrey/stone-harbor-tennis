@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/auth";
+import { parseId } from "@/lib/params";
 
 export async function DELETE(
   _req: NextRequest,
@@ -9,8 +10,11 @@ export async function DELETE(
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { signupId } = await params;
-  await prisma.signup.delete({ where: { id: Number(signupId) } });
+  const signupId = parseId((await params).signupId);
+  if (signupId === null) {
+    return NextResponse.json({ error: "Signup not found" }, { status: 404 });
+  }
+  await prisma.signup.delete({ where: { id: signupId } });
   return NextResponse.json({ ok: true });
 }
 
@@ -23,7 +27,10 @@ export async function PATCH(
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { signupId } = await params;
+  const signupId = parseId((await params).signupId);
+  if (signupId === null) {
+    return NextResponse.json({ error: "Signup not found" }, { status: 404 });
+  }
   const { is_alternate } = await req.json();
 
   if (typeof is_alternate !== "boolean") {
@@ -34,7 +41,7 @@ export async function PATCH(
   }
 
   const signup = await prisma.signup.update({
-    where: { id: Number(signupId) },
+    where: { id: signupId },
     data: { is_alternate },
     include: { player: true },
   });

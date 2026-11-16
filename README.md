@@ -57,8 +57,9 @@ API Routes (Next.js route handlers)
   ├── GET  /api/sessions            list all sessions
   ├── POST /api/sessions            create session (admin only)
   ├── DELETE /api/sessions/[id]     delete session (admin only)
-  ├── GET  /api/sessions/[id]/signups     list signups
+  ├── GET  /api/sessions/[id]        session + its signups (phones only for the admin)
   ├── POST /api/sessions/[id]/signups     sign up (register_signup PL/pgSQL function)
+  ├── PATCH /api/sessions/[id]/signups/[signupId]   move between playing and alternate (admin)
   ├── DELETE /api/sessions/[id]/signups/[signupId]  remove signup (admin)
   ├── GET  /api/sessions/[id]/pairings    get pairings
   ├── POST /api/sessions/[id]/pairings    generate pairings (admin, Fisher-Yates shuffle)
@@ -185,7 +186,7 @@ As of 2026-11-16 (`feat/plpgsql-register-signup`, branched from `main` @ `40a9d4
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 15 | 122 |
+| Unit (`npm test`) | 15 | 134 |
 | DB integration (`INTEGRATION_DATABASE_URL=... npx vitest run src/db`) | 1 | 9 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
@@ -194,7 +195,7 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 95.4% (165/173) | 89.0% (81/91) | 96.8% (30/31) | 95.2% (160/168) |
+| 95.8% (182/190) | 90.8% (99/109) | 96.8% (30/31) | 95.7% (177/185) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.

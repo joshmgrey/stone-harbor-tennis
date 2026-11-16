@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Signup } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PLAYERS_PER_COURT } from "@/lib/session";
-import { publicPlayerSelect } from "@/lib/player";
+import { MAX_NAME_LENGTH, MAX_PHONE_LENGTH, publicPlayerSelect } from "@/lib/player";
 import { parseId } from "@/lib/params";
 
 /** Outcome reported by the `register_signup` PL/pgSQL function. */
@@ -63,6 +63,12 @@ export async function POST(
 
   const trimmedName = name.trim();
   const trimmedPhone = (phone as string | null | undefined)?.trim() || null;
+  if (trimmedName.length > MAX_NAME_LENGTH) {
+    return NextResponse.json({ error: "Name is too long" }, { status: 400 });
+  }
+  if (trimmedPhone && trimmedPhone.length > MAX_PHONE_LENGTH) {
+    return NextResponse.json({ error: "Phone is too long" }, { status: 400 });
+  }
 
   // The player upsert, duplicate check, capacity check and insert have to be
   // atomic. Without that, two requests racing for the last open spot both

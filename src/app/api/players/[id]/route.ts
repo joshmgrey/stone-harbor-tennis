@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/auth";
 import { parseId } from "@/lib/params";
-
-/** Generous cap so a phone field can't be used to store arbitrary blobs. */
-const MAX_PHONE_LENGTH = 32;
+import { MAX_PHONE_LENGTH } from "@/lib/player";
 
 // Admin: set or clear a player's phone. The public signup form never changes
 // a phone already on file (anyone can type any name), so this is the only way

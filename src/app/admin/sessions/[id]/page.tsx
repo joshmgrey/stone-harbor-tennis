@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Session, Signup, Pairing } from "@/types";
 import { capacity } from "@/lib/session";
+import { MAX_PHONE_LENGTH } from "@/lib/player";
 
 function formatDate(dateStr: string) {
   const [y, mo, d] = dateStr.split("-").map(Number);
@@ -124,6 +125,9 @@ export default function AdminSessionPage() {
       }
       setEditingPlayerId(null);
       load();
+    } catch {
+      // fetch itself rejected (offline, server restarting): nothing was saved.
+      setPhoneError("Couldn't reach the server — not saved");
     } finally {
       setBusyId(null);
     }
@@ -185,7 +189,7 @@ export default function AdminSessionPage() {
                 onChange={(e) => setPhoneDraft(e.target.value)}
                 placeholder="Phone (blank to clear)"
                 aria-label={`Phone for ${s.player.name}`}
-                maxLength={32}
+                maxLength={MAX_PHONE_LENGTH}
                 autoFocus
                 className="w-40 border border-gray-300 rounded px-2 py-1 text-xs"
               />

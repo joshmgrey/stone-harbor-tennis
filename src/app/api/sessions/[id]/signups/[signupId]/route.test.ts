@@ -88,3 +88,19 @@ describe("PATCH /api/sessions/:id/signups/:signupId", () => {
     );
   });
 });
+
+describe("malformed signup ids", () => {
+  it("DELETE returns 404 without deleting", async () => {
+    isAdmin.mockResolvedValue(true);
+    const res = await DELETE(req, ctx("1", "abc"));
+    expect(res.status).toBe(404);
+    expect(deleteFn).not.toHaveBeenCalled();
+  });
+
+  it("PATCH returns 404 without updating", async () => {
+    isAdmin.mockResolvedValue(true);
+    const res = await PATCH(patchRequest({ is_alternate: true }), ctx("1", "1e3"));
+    expect(res.status).toBe(404);
+    expect(update).not.toHaveBeenCalled();
+  });
+});

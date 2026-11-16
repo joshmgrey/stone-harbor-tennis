@@ -187,3 +187,27 @@ describe("POST /api/sessions/:id/signups", () => {
     );
   });
 });
+
+describe("length limits", () => {
+  it("rejects a name longer than MAX_NAME_LENGTH with 400", async () => {
+    const res = await POST(jsonRequest({ name: "a".repeat(81) }), ctx("1"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Name is too long" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("rejects a phone longer than MAX_PHONE_LENGTH with 400", async () => {
+    const res = await POST(jsonRequest({ name: "Alice", phone: "5".repeat(33) }), ctx("1"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Phone is too long" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("accepts values exactly at the limits (after trimming)", async () => {
+    const res = await POST(
+      jsonRequest({ name: ` ${"a".repeat(80)} `, phone: "5".repeat(32) }),
+      ctx("1")
+    );
+    expect(res.status).toBe(201);
+  });
+});

@@ -115,3 +115,18 @@ describe("DELETE /api/sessions/:id", () => {
     expect(deleteFn).toHaveBeenCalledWith({ where: { id: 1 } });
   });
 });
+
+describe("malformed session ids", () => {
+  it.each(["abc", "0x10", "1e3", "0"])("GET %j returns 404 without querying", async (id) => {
+    const res = await GET(req, ctx(id));
+    expect(res.status).toBe(404);
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("DELETE with a malformed id returns 404 without deleting", async () => {
+    isAdmin.mockResolvedValue(true);
+    const res = await DELETE(req, ctx("abc"));
+    expect(res.status).toBe(404);
+    expect(deleteFn).not.toHaveBeenCalled();
+  });
+});
