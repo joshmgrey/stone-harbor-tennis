@@ -3,9 +3,7 @@ import type { Signup } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PLAYERS_PER_COURT } from "@/lib/session";
 import { publicPlayerSelect } from "@/lib/player";
-
-/** Largest value a Postgres `integer` (sessions.id) can hold. */
-const PG_INT_MAX = 2_147_483_647;
+import { parseId } from "@/lib/params";
 
 /** Outcome reported by the `register_signup` PL/pgSQL function. */
 type RegisterStatus =
@@ -41,7 +39,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { name, phone, is_alternate } = await req.json();
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const { name, phone, is_alternate } = (body ?? {}) as Record<string, unknown>;
   const asAlternate = is_alternate === true;
 
   if (typeof name !== "string" || !name.trim()) {
@@ -51,13 +56,13 @@ export async function POST(
     return NextResponse.json({ error: "Phone must be text" }, { status: 400 });
   }
 
-  const sessionId = Number(id);
-  if (!Number.isInteger(sessionId) || sessionId < 1 || sessionId > PG_INT_MAX) {
+  const sessionId = parseId(id);
+  if (sessionId === null) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
   const trimmedName = name.trim();
-  const trimmedPhone = phone?.trim() || null;
+  const trimmedPhone = (phone as string | null | undefined)?.trim() || null;
 
   // The player upsert, duplicate check, capacity check and insert have to be
   // atomic. Without that, two requests racing for the last open spot both

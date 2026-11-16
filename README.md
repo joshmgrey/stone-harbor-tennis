@@ -58,11 +58,12 @@ API Routes (Next.js route handlers)
   ├── POST /api/sessions            create session (admin only)
   ├── DELETE /api/sessions/[id]     delete session (admin only)
   ├── GET  /api/sessions/[id]/signups     list signups
-  ├── POST /api/sessions/[id]/signups     sign up (upserts player roster)
+  ├── POST /api/sessions/[id]/signups     sign up (register_signup PL/pgSQL function)
   ├── DELETE /api/sessions/[id]/signups/[signupId]  remove signup (admin)
   ├── GET  /api/sessions/[id]/pairings    get pairings
   ├── POST /api/sessions/[id]/pairings    generate pairings (admin, Fisher-Yates shuffle)
   ├── GET  /api/players             player roster for autocomplete
+  ├── PATCH /api/players/[id]       set or clear a player's phone (admin)
   └── GET  /api/calendar            iCal feed for calendar subscription
 
 Database (PostgreSQL)
@@ -184,8 +185,8 @@ As of 2026-11-16 (`feat/plpgsql-register-signup`, branched from `main` @ `40a9d4
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 13 | 87 |
-| DB integration (`INTEGRATION_DATABASE_URL=... npx vitest run src/db`) | 1 | 7 |
+| Unit (`npm test`) | 15 | 122 |
+| DB integration (`INTEGRATION_DATABASE_URL=... npx vitest run src/db`) | 1 | 9 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
 
@@ -193,7 +194,7 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 94.6% (139/147) | 86.1% (62/72) | 96.6% (28/29) | 94.4% (135/143) |
+| 95.4% (165/173) | 89.0% (81/91) | 96.8% (30/31) | 95.2% (160/168) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.

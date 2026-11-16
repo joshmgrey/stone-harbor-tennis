@@ -125,7 +125,19 @@ describe("POST /api/sessions/:id/signups", () => {
     expect(queryRaw).not.toHaveBeenCalled();
   });
 
-  it.each(["abc", "1.5", "0", "-3", "2147483648"])(
+  it.each(["not json", "null", "[]"])("rejects body %j with 400", async (raw) => {
+    const req = new Request("http://localhost/api/sessions/1/signups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: raw,
+    }) as unknown as NextRequest;
+
+    const res = await POST(req, ctx("1"));
+    expect(res.status).toBe(400);
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it.each(["abc", "1.5", "0", "-3", "2147483648", "1e3", "0x10", " 1"])(
     "returns 404 for an invalid session id (%s) without querying",
     async (id) => {
       const res = await POST(jsonRequest({ name: "Alice" }), ctx(id));

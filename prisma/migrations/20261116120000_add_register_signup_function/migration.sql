@@ -4,16 +4,19 @@
 --
 -- Locks the session row (FOR UPDATE) so concurrent signups for the same
 -- session serialize. Under that lock it re-checks that the session exists,
--- finds or creates the player by name, rejects a player who is already on the
--- list, enforces capacity for non-alternates, and inserts. The lock is held
+-- looks up the player by name, rejects a player who is already on the list,
+-- enforces capacity for non-alternates, then creates the player if new and
+-- inserts the signup. The lock is held
 -- until the calling statement's transaction commits, so the next waiter's
 -- count sees this insert.
 --
--- Player lookup: INSERT ... ON CONFLICT DO NOTHING, so two first-time signups
--- under the same new name can't race into a unique violation. The form is
--- unauthenticated, so an existing player's record is never changed by a
--- rejected request: a phone is only filled in (never overwritten) once the
--- signup has actually been created.
+-- Players: the form is unauthenticated (anyone can type any name), so a
+-- rejected request changes nothing: a new player is only created, and a
+-- missing phone only filled in, once the signup is actually going to be
+-- created. An existing phone is never overwritten here; the organizer edits
+-- phones (PATCH /api/players/:id). New players are inserted with
+-- ON CONFLICT DO NOTHING so two first-time signups under the same new name
+-- (for different sessions) can't race into a unique violation.
 --
 -- Returns one row. status is one of
 --   'created'           the remaining columns describe the new signup
@@ -55,6 +58,7 @@ AS $$
 DECLARE
   v_courts             integer;
   v_player             players%ROWTYPE;
+  v_player_exists      boolean;
   v_signup             signups%ROWTYPE;
   v_existing_alternate boolean;
   v_taken              integer;
@@ -67,26 +71,20 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO players (name, phone)
-  VALUES (p_name, p_phone)
-  ON CONFLICT (name) DO NOTHING
-  RETURNING * INTO v_player;
+  SELECT * INTO v_player FROM players p WHERE p.name = p_name;
+  v_player_exists := FOUND;
 
-  IF NOT FOUND THEN
-    -- Already exists (possibly just committed by a concurrent request; this
-    -- statement gets a fresh snapshot, so it sees that row).
-    SELECT * INTO v_player FROM players p WHERE p.name = p_name;
-  END IF;
+  IF v_player_exists THEN
+    SELECT su.is_alternate INTO v_existing_alternate
+    FROM signups su
+    WHERE su.session_id = p_session_id AND su.player_id = v_player.id
+    LIMIT 1;
 
-  SELECT su.is_alternate INTO v_existing_alternate
-  FROM signups su
-  WHERE su.session_id = p_session_id AND su.player_id = v_player.id
-  LIMIT 1;
-
-  IF FOUND THEN
-    status := CASE WHEN v_existing_alternate THEN 'already_alternate' ELSE 'already_playing' END;
-    RETURN NEXT;
-    RETURN;
+    IF FOUND THEN
+      status := CASE WHEN v_existing_alternate THEN 'already_alternate' ELSE 'already_playing' END;
+      RETURN NEXT;
+      RETURN;
+    END IF;
   END IF;
 
   IF NOT p_is_alternate THEN
@@ -101,13 +99,28 @@ BEGIN
     END IF;
   END IF;
 
+  -- The signup will be created, so only now create a new player (a rejected
+  -- request leaves no row behind), or fill in a missing phone for an existing
+  -- one (never overwrite it; the organizer edits phones).
+  IF NOT v_player_exists THEN
+    INSERT INTO players (name, phone)
+    VALUES (p_name, p_phone)
+    ON CONFLICT (name) DO NOTHING
+    RETURNING * INTO v_player;
+
+    IF NOT FOUND THEN
+      -- A concurrent signup for another session just created this name (that
+      -- request can't be for this session: it would need our lock). This
+      -- statement gets a fresh snapshot, so it sees that row.
+      SELECT * INTO v_player FROM players p WHERE p.name = p_name;
+    END IF;
+  ELSIF v_player.phone IS NULL AND p_phone IS NOT NULL THEN
+    UPDATE players SET phone = p_phone WHERE id = v_player.id AND phone IS NULL;
+  END IF;
+
   INSERT INTO signups (session_id, player_id, is_alternate)
   VALUES (p_session_id, v_player.id, p_is_alternate)
   RETURNING * INTO v_signup;
-
-  IF v_player.phone IS NULL AND p_phone IS NOT NULL THEN
-    UPDATE players SET phone = p_phone WHERE id = v_player.id AND phone IS NULL;
-  END IF;
 
   status            := 'created';
   signup_id         := v_signup.id;

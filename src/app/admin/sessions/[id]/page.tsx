@@ -34,6 +34,10 @@ export default function AdminSessionPage() {
   const [generating, setGenerating] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [pairingError, setPairingError] = useState("");
+  // Inline phone editor: which player is being edited, and the draft value.
+  const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [phoneError, setPhoneError] = useState("");
 
   const load = useCallback(async () => {
     const [detailRes, pairingsRes] = await Promise.all([
@@ -98,6 +102,33 @@ export default function AdminSessionPage() {
     load();
   }
 
+  function startEditingPhone(s: Signup) {
+    setEditingPlayerId(s.player.id);
+    setPhoneDraft(s.player.phone ?? "");
+    setPhoneError("");
+  }
+
+  async function handleSavePhone(signupId: number, playerId: number) {
+    setBusyId(signupId);
+    setPhoneError("");
+    try {
+      const res = await fetch(`/api/players/${playerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phoneDraft.trim() || null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setPhoneError(data.error ?? "Couldn't save the phone number");
+        return;
+      }
+      setEditingPlayerId(null);
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -140,8 +171,49 @@ export default function AdminSessionPage() {
         <span className="text-gray-400 text-sm w-6 text-right shrink-0">{index + 1}.</span>
         <div className="flex-1 min-w-0">
           <div className="font-medium text-gray-900">{s.player.name}</div>
-          {s.player.phone && (
-            <div className="text-gray-400 text-xs">{s.player.phone}</div>
+          {editingPlayerId === s.player.id ? (
+            <form
+              className="mt-1 flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSavePhone(s.id, s.player.id);
+              }}
+            >
+              <input
+                type="tel"
+                value={phoneDraft}
+                onChange={(e) => setPhoneDraft(e.target.value)}
+                placeholder="Phone (blank to clear)"
+                aria-label={`Phone for ${s.player.name}`}
+                maxLength={32}
+                autoFocus
+                className="w-40 border border-gray-300 rounded px-2 py-1 text-xs"
+              />
+              <button
+                type="submit"
+                disabled={busyId === s.id}
+                className="text-xs font-medium text-green-700 hover:text-green-900 disabled:opacity-40"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPlayerId(null)}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+              {phoneError && <span className="text-xs text-red-600">{phoneError}</span>}
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => startEditingPhone(s)}
+              className="text-xs text-gray-400 hover:text-green-700"
+              title="Edit phone"
+            >
+              {s.player.phone || "+ Add phone"} ✎
+            </button>
           )}
         </div>
         <button

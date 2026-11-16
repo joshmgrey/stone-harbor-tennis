@@ -13,11 +13,16 @@ const url = process.env.INTEGRATION_DATABASE_URL;
 
 const PLAYERS_PER_COURT = 4;
 
+// Every column the route reads from register_signup (RegisterResult in
+// src/app/api/sessions/[id]/signups/route.ts).
 type Row = {
   status: string;
   signup_id: number | null;
+  is_alternate: boolean | null;
+  signed_up_at: Date | null;
   player_id: number | null;
   player_name: string | null;
+  player_created_at: Date | null;
 };
 
 describe.skipIf(!url)("register_signup (real Postgres)", () => {
@@ -83,7 +88,44 @@ describe.skipIf(!url)("register_signup (real Postgres)", () => {
     await pool.end();
   });
 
-  it("makes a signup for the last spot wait for an uncommitted one (row lock)", async () => {
+  it("returns every column the route maps, with real values when created", async () => {
+    const created = await register(sessionId, nameOf("cols"), { alternate: true });
+
+    expect(Object.keys(created).sort()).toEqual(
+      [
+        "is_alternate",
+        "player_created_at",
+        "player_id",
+        "player_name",
+        "signed_up_at",
+        "signup_id",
+        "status",
+      ].sort()
+    );
+    expect(created).toMatchObject({
+      status: "created",
+      signup_id: expect.any(Number),
+      is_alternate: true,
+      signed_up_at: expect.any(Date),
+      player_id: expect.any(Number),
+      player_name: nameOf("cols"),
+      player_created_at: expect.any(Date),
+    });
+
+    const { rows } = await pool.query(
+      "SELECT session_id, player_id, is_alternate FROM signups WHERE id = $1",
+      [created.signup_id]
+    );
+    expect(rows[0]).toEqual({
+      session_id: sessionId,
+      player_id: created.player_id,
+      is_alternate: true,
+    });
+  });
+
+  // Longer than vitest's 5s default so the polling deadline below, not the
+  // test timeout, decides a failure and reports the real assertion.
+  it("makes a signup for the last spot wait for an uncommitted one (row lock)", { timeout: 20_000 }, async () => {
     for (let i = 1; i <= 3; i++) await register(sessionId, nameOf(`lock ${i}`));
 
     // A takes the last spot but hasn't committed. Without FOR UPDATE, B's
@@ -182,6 +224,14 @@ describe.skipIf(!url)("register_signup (real Postgres)", () => {
       "created"
     );
     expect(await phoneOf(nameOf("nophone"))).toBe("555-0003");
+  });
+
+  it("creates no player for a rejected signup under a new name", async () => {
+    for (let i = 1; i <= 4; i++) await register(sessionId, nameOf(`cap ${i}`));
+
+    const res = await register(sessionId, nameOf("stranger"), { phone: "555-0004" });
+    expect(res.status).toBe("full");
+    expect(await phoneOf(nameOf("stranger"))).toBeUndefined(); // no row at all
   });
 
   it("handles concurrent first signups under one new name without a unique violation", async () => {
