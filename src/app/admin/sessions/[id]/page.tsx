@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Session, Signup, Pairing } from "@/types";
 import { capacity } from "@/lib/session";
+import { MAX_PHONE_LENGTH } from "@/lib/player";
 
 function formatDate(dateStr: string) {
   const [y, mo, d] = dateStr.split("-").map(Number);
@@ -34,6 +35,12 @@ export default function AdminSessionPage() {
   const [generating, setGenerating] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [pairingError, setPairingError] = useState("");
+  // Inline phone editor: which player is being edited, and the draft value.
+  const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  // Last failed remove/move, shown above the player lists.
+  const [signupError, setSignupError] = useState("");
 
   const load = useCallback(async () => {
     const [detailRes, pairingsRes] = await Promise.all([
@@ -65,6 +72,7 @@ export default function AdminSessionPage() {
 
   async function handleGeneratePairings() {
     setPairingError("");
+    setSignupError(""); // a new action; don't leave an old remove/move error up
     setGenerating(true);
     try {
       const res = await fetch(`/api/sessions/${id}/pairings`, { method: "POST" });
@@ -80,22 +88,77 @@ export default function AdminSessionPage() {
     }
   }
 
-  async function handleRemoveSignup(signupId: number) {
+  /**
+   * Run a signup change (remove / move), report a failure instead of
+   * swallowing it, always re-enable the row, and reload so the list matches
+   * the server (e.g. a signup already removed in another tab disappears).
+   */
+  async function runSignupAction(signupId: number, init: RequestInit, failMessage: string) {
     setBusyId(signupId);
-    await fetch(`/api/sessions/${id}/signups/${signupId}`, { method: "DELETE" });
-    setBusyId(null);
-    load();
+    setSignupError("");
+    try {
+      const res = await fetch(`/api/sessions/${id}/signups/${signupId}`, init);
+      if (res.status === 404) {
+        setSignupError("That signup no longer exists — the list has been refreshed.");
+      } else if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSignupError(data.error ?? failMessage);
+      }
+    } catch {
+      setSignupError("Couldn't reach the server — nothing was changed.");
+    } finally {
+      setBusyId(null);
+    }
+    // Refresh the list. If the server is unreachable this fails too; the
+    // error above already says so, so don't add an unhandled rejection.
+    load().catch(() => {});
   }
 
-  async function handleToggleAlternate(signupId: number, makeAlternate: boolean) {
+  function handleRemoveSignup(signupId: number) {
+    return runSignupAction(signupId, { method: "DELETE" }, "Couldn't remove the player");
+  }
+
+  function handleToggleAlternate(signupId: number, makeAlternate: boolean) {
+    return runSignupAction(
+      signupId,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_alternate: makeAlternate }),
+      },
+      "Couldn't move the player"
+    );
+  }
+
+  function startEditingPhone(s: Signup) {
+    setEditingPlayerId(s.player.id);
+    setPhoneDraft(s.player.phone ?? "");
+    setPhoneError("");
+    setSignupError(""); // a new action; don't leave an old remove/move error up
+  }
+
+  async function handleSavePhone(signupId: number, playerId: number) {
     setBusyId(signupId);
-    await fetch(`/api/sessions/${id}/signups/${signupId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_alternate: makeAlternate }),
-    });
-    setBusyId(null);
-    load();
+    setPhoneError("");
+    try {
+      const res = await fetch(`/api/players/${playerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phoneDraft.trim() || null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setPhoneError(data.error ?? "Couldn't save the phone number");
+        return;
+      }
+      setEditingPlayerId(null);
+      load().catch(() => {}); // saved; a failed refresh just leaves the old list up
+    } catch {
+      // fetch itself rejected (offline, server restarting): nothing was saved.
+      setPhoneError("Couldn't reach the server — not saved");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   if (loading) {
@@ -140,8 +203,49 @@ export default function AdminSessionPage() {
         <span className="text-gray-400 text-sm w-6 text-right shrink-0">{index + 1}.</span>
         <div className="flex-1 min-w-0">
           <div className="font-medium text-gray-900">{s.player.name}</div>
-          {s.player.phone && (
-            <div className="text-gray-400 text-xs">{s.player.phone}</div>
+          {editingPlayerId === s.player.id ? (
+            <form
+              className="mt-1 flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSavePhone(s.id, s.player.id);
+              }}
+            >
+              <input
+                type="tel"
+                value={phoneDraft}
+                onChange={(e) => setPhoneDraft(e.target.value)}
+                placeholder="Phone (blank to clear)"
+                aria-label={`Phone for ${s.player.name}`}
+                maxLength={MAX_PHONE_LENGTH}
+                autoFocus
+                className="w-40 border border-gray-300 rounded px-2 py-1 text-xs"
+              />
+              <button
+                type="submit"
+                disabled={busyId === s.id}
+                className="text-xs font-medium text-green-700 hover:text-green-900 disabled:opacity-40"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPlayerId(null)}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+              {phoneError && <span className="text-xs text-red-600">{phoneError}</span>}
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => startEditingPhone(s)}
+              className="text-xs text-gray-400 hover:text-green-700"
+              title="Edit phone"
+            >
+              {s.player.phone || "+ Add phone"} ✎
+            </button>
           )}
         </div>
         <button
@@ -271,6 +375,11 @@ export default function AdminSessionPage() {
 
       {/* Signups */}
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+        {signupError && (
+          <p role="alert" className="mb-4 text-sm text-red-600">
+            {signupError}
+          </p>
+        )}
         <h2 className="text-lg font-bold text-gray-800 mb-4">
           Playing ({regulars.length} / {seats})
         </h2>

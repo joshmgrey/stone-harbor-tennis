@@ -1,30 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-const findUnique = vi.fn();
-const upsert = vi.fn();
-const findFirst = vi.fn();
-const create = vi.fn();
-const count = vi.fn();
 const queryRaw = vi.fn();
+const playerFindUnique = vi.fn();
 
-// The signup route now does its capacity check + insert inside an interactive
-// `prisma.$transaction(async (tx) => ...)`; the transaction client `tx` exposes
-// the same surface the callback touches.
-const tx = {
-  $queryRaw: (...a: unknown[]) => queryRaw(...a),
-  signup: {
-    count: (a: unknown) => count(a),
-    create: (a: unknown) => create(a),
-  },
-};
-
+// The player upsert, duplicate check, capacity check and insert run inside
+// the `register_signup` PL/pgSQL function, called via `prisma.$queryRaw`.
+// These tests mock its result row; the function itself (locking included) is
+// tested against a real Postgres in src/db/register-signup.integration.test.ts.
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    session: { findUnique: (a: unknown) => findUnique(a) },
-    player: { upsert: (a: unknown) => upsert(a) },
-    signup: { findFirst: (a: unknown) => findFirst(a) },
-    $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
+    $queryRaw: (...a: unknown[]) => queryRaw(...a),
+    player: { findUnique: (a: unknown) => playerFindUnique(a) },
   },
 }));
 
@@ -39,126 +26,209 @@ const jsonRequest = (body: unknown) =>
     body: JSON.stringify(body),
   }) as unknown as NextRequest;
 
-// A 2-court session (capacity 8). Set the regular-signup count separately with
-// `count.mockResolvedValue(...)`.
-const session = { id: 1, courts: 2 };
+const signedUpAt = new Date("2026-11-16T19:00:00.000Z");
+const playerCreatedAt = new Date("2026-11-01T12:00:00.000Z");
+
+const createdRow = {
+  status: "created",
+  signup_id: 99,
+  is_alternate: false,
+  signed_up_at: signedUpAt,
+  player_id: 10,
+  player_name: "Alice",
+  player_created_at: playerCreatedAt,
+};
+
+/** Make register_signup report a non-created status. */
+const registerReturns = (status: string) =>
+  queryRaw.mockResolvedValue([
+    {
+      status,
+      signup_id: null,
+      is_alternate: null,
+      signed_up_at: null,
+      player_id: null,
+      player_name: null,
+      player_created_at: null,
+    },
+  ]);
+
+/** The interpolated values passed to the register_signup tagged template. */
+const registerArgs = () => queryRaw.mock.calls[0].slice(1);
 
 beforeEach(() => {
-  findUnique.mockReset().mockResolvedValue(session);
-  upsert.mockReset().mockResolvedValue({ id: 10 });
-  findFirst.mockReset().mockResolvedValue(null);
-  create.mockReset().mockImplementation((a) => ({ id: 99, ...a.data }));
-  count.mockReset().mockResolvedValue(0);
-  queryRaw.mockReset().mockResolvedValue([]);
+  playerFindUnique.mockReset().mockResolvedValue(null);
+  queryRaw.mockReset().mockResolvedValue([createdRow]);
 });
 
 describe("POST /api/sessions/:id/signups", () => {
-  it("creates a signup on the happy path and returns 201", async () => {
-    count.mockResolvedValue(3);
-
+  it("creates a signup on the happy path and returns 201 with public fields", async () => {
     const res = await POST(jsonRequest({ name: "Alice", phone: "555-1212" }), ctx("1"));
     expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({
+      id: 99,
+      session_id: 1,
+      player_id: 10,
+      is_alternate: false,
+      signed_up_at: signedUpAt.toISOString(),
+      player: { id: 10, name: "Alice", created_at: playerCreatedAt.toISOString() },
+    });
 
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: "Alice" } })
-    );
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: { session_id: 1, player_id: 10, is_alternate: false },
-      })
-    );
+    // session id, name, phone, alternate flag, players per court
+    expect(registerArgs()).toEqual([1, "Alice", "555-1212", false, 4]);
   });
 
-  it("does not return the player's phone number", async () => {
+  it("calls the register_signup function", async () => {
     await POST(jsonRequest({ name: "Alice" }), ctx("1"));
 
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        include: {
-          player: { select: { id: true, name: true, created_at: true } },
-        },
-      })
-    );
+    const sql = (queryRaw.mock.calls[0][0] as string[]).join("?");
+    expect(sql).toMatch(/FROM register_signup\(/);
   });
 
-  it("locks the session row before checking capacity", async () => {
-    count.mockResolvedValue(3);
+  it("passes the alternate flag through", async () => {
+    await POST(jsonRequest({ name: "Alice", is_alternate: true }), ctx("1"));
+    expect(registerArgs()[3]).toBe(true);
+  });
 
-    await POST(jsonRequest({ name: "Alice" }), ctx("1"));
+  it("treats a non-boolean is_alternate as false", async () => {
+    await POST(jsonRequest({ name: "Alice", is_alternate: "yes" }), ctx("1"));
+    expect(registerArgs()[3]).toBe(false);
+  });
 
-    expect(queryRaw).toHaveBeenCalled();
-    const invocationOrder = (fn: ReturnType<typeof vi.fn>) =>
-      fn.mock.invocationCallOrder[0];
-    expect(invocationOrder(queryRaw)).toBeLessThan(invocationOrder(count));
-    expect(invocationOrder(count)).toBeLessThan(invocationOrder(create));
+  it("does not return a phone number", async () => {
+    const res = await POST(jsonRequest({ name: "Alice", phone: "555-1212" }), ctx("1"));
+    expect(JSON.stringify(await res.json())).not.toMatch(/phone|555-1212/);
   });
 
   it("trims the name and normalizes a blank phone to null", async () => {
     await POST(jsonRequest({ name: "  Bob  ", phone: "   " }), ctx("1"));
-
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { name: "Bob" },
-        create: { name: "Bob", phone: null },
-      })
-    );
+    expect(registerArgs().slice(1, 3)).toEqual(["Bob", null]);
   });
 
   it("rejects a missing/blank name with 400 before hitting the database", async () => {
     const res = await POST(jsonRequest({ name: "   " }), ctx("1"));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Name is required" });
-    expect(findUnique).not.toHaveBeenCalled();
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when the session does not exist", async () => {
-    findUnique.mockResolvedValue(null);
+  it.each([123, null, { first: "Alice" }])(
+    "rejects a non-string name (%j) with 400",
+    async (name) => {
+      const res = await POST(jsonRequest({ name }), ctx("1"));
+      expect(res.status).toBe(400);
+      expect(queryRaw).not.toHaveBeenCalled();
+    }
+  );
 
-    const res = await POST(jsonRequest({ name: "Alice" }), ctx("999"));
+  it("rejects a non-string phone with 400", async () => {
+    const res = await POST(jsonRequest({ name: "Alice", phone: 5551212 }), ctx("1"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Phone must be text" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it.each(["not json", "null", "[]"])("rejects body %j with 400", async (raw) => {
+    const req = new Request("http://localhost/api/sessions/1/signups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: raw,
+    }) as unknown as NextRequest;
+
+    const res = await POST(req, ctx("1"));
+    expect(res.status).toBe(400);
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it.each(["abc", "1.5", "0", "-3", "2147483648", "1e3", "0x10", " 1"])(
+    "returns 404 for an invalid session id (%s) without querying",
+    async (id) => {
+      const res = await POST(jsonRequest({ name: "Alice" }), ctx(id));
+      expect(res.status).toBe(404);
+      expect(queryRaw).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns 404 when the session does not exist", async () => {
+    registerReturns("not_found");
+
+    const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(404);
-    expect(create).not.toHaveBeenCalled();
   });
 
   it("returns 409 when the player is already signed up to play", async () => {
-    findFirst.mockResolvedValue({ id: 5, is_alternate: false });
+    registerReturns("already_playing");
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({
       error: "You're already signed up to play this session.",
     });
-    expect(create).not.toHaveBeenCalled();
   });
 
   it("returns 409 with the alternate-list message on a duplicate alternate signup", async () => {
-    findFirst.mockResolvedValue({ id: 6, is_alternate: true });
+    registerReturns("already_alternate");
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/alternate list/);
   });
 
-  it("returns 409 when the session is full and the player is not joining as an alternate", async () => {
-    count.mockResolvedValue(8); // capacity is 8
+  it("returns 409 when the session is full", async () => {
+    registerReturns("full");
 
     const res = await POST(jsonRequest({ name: "Alice" }), ctx("1"));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/full/);
-    expect(create).not.toHaveBeenCalled();
   });
 
-  it("lets a player join a full session as an alternate", async () => {
-    count.mockResolvedValue(8);
+  it("fails loudly if register_signup returns no row", async () => {
+    queryRaw.mockResolvedValue([]);
 
+    await expect(POST(jsonRequest({ name: "Alice" }), ctx("1"))).rejects.toThrow(
+      /returned no row/
+    );
+  });
+});
+
+describe("length limits", () => {
+  it("rejects a new name longer than MAX_NAME_LENGTH with 400", async () => {
+    const res = await POST(jsonRequest({ name: "a".repeat(81) }), ctx("1"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Name is too long" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("lets an existing player with a longer name still sign up", async () => {
+    playerFindUnique.mockResolvedValue({ id: 10 });
+    const longName = "a".repeat(85);
+
+    const res = await POST(jsonRequest({ name: longName }), ctx("1"));
+    expect(res.status).toBe(201);
+    expect(playerFindUnique).toHaveBeenCalledWith({
+      where: { name: longName },
+      select: { id: true },
+    });
+    expect(registerArgs()[1]).toBe(longName);
+  });
+
+  it("doesn't look up the roster for names within the limit", async () => {
+    await POST(jsonRequest({ name: "Alice" }), ctx("1"));
+    expect(playerFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects a phone longer than MAX_PHONE_LENGTH with 400", async () => {
+    const res = await POST(jsonRequest({ name: "Alice", phone: "5".repeat(33) }), ctx("1"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Phone is too long" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("accepts values exactly at the limits (after trimming)", async () => {
     const res = await POST(
-      jsonRequest({ name: "Alice", is_alternate: true }),
+      jsonRequest({ name: ` ${"a".repeat(80)} `, phone: "5".repeat(32) }),
       ctx("1")
     );
     expect(res.status).toBe(201);
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ is_alternate: true }),
-      })
-    );
   });
 });

@@ -5,6 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { Session, Signup, Pairing, Player } from "@/types";
 import { capacity } from "@/lib/session";
+// No maxLength on the name input: a returning player may pick a roster name
+// longer than MAX_NAME_LENGTH (allowed server-side), and truncating it would
+// silently turn them into a different player.
+import { MAX_PHONE_LENGTH } from "@/lib/player";
 import MapEmbed from "@/components/MapEmbed";
 
 function formatDate(dateStr: string) {
@@ -266,13 +270,14 @@ export default function SessionPage() {
                 Phone <span className="text-gray-400 font-normal">(optional)</span>
               </label>
               <p className="text-xs text-gray-400 mb-1">
-                Only the organizer sees this. Returning players can leave it
-                blank to keep the number on file.
+                Only the organizer sees this. Already have a number on file?
+                Leave it blank — to change it, ask the organizer.
               </p>
               <input
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                maxLength={MAX_PHONE_LENGTH}
                 placeholder="(609) 555-0100"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               />

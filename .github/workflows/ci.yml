@@ -137,6 +137,14 @@ jobs:
             await c.end();
           '
 
+      # The register_signup PL/pgSQL function (capacity locking, duplicates,
+      # phone handling) against the real DB, as the app role. The unit suite
+      # mocks it, so this is its only automated coverage.
+      - name: Database integration tests (app role)
+        run: npx vitest run src/db
+        env:
+          INTEGRATION_DATABASE_URL: ${{ env.APP_DATABASE_URL }}
+
       - run: npm run build
 
       - run: npx playwright install --with-deps chromium

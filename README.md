@@ -57,12 +57,14 @@ API Routes (Next.js route handlers)
   ├── GET  /api/sessions            list all sessions
   ├── POST /api/sessions            create session (admin only)
   ├── DELETE /api/sessions/[id]     delete session (admin only)
-  ├── GET  /api/sessions/[id]/signups     list signups
-  ├── POST /api/sessions/[id]/signups     sign up (upserts player roster)
+  ├── GET  /api/sessions/[id]        session + its signups (phones only for the admin)
+  ├── POST /api/sessions/[id]/signups     sign up (register_signup PL/pgSQL function)
+  ├── PATCH /api/sessions/[id]/signups/[signupId]   move between playing and alternate (admin)
   ├── DELETE /api/sessions/[id]/signups/[signupId]  remove signup (admin)
   ├── GET  /api/sessions/[id]/pairings    get pairings
   ├── POST /api/sessions/[id]/pairings    generate pairings (admin, Fisher-Yates shuffle)
   ├── GET  /api/players             player roster for autocomplete
+  ├── PATCH /api/players/[id]       set or clear a player's phone (admin)
   └── GET  /api/calendar            iCal feed for calendar subscription
 
 Database (PostgreSQL)
@@ -180,11 +182,12 @@ mocked at the module boundary.
 
 ### Test and coverage numbers
 
-As of 2026-10-12 (`main` @ `1a53447`), all passing:
+As of 2026-11-16 (`main` after PR #60), all passing:
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 13 | 76 |
+| Unit (`npm test`) | 15 | 144 |
+| DB integration (`INTEGRATION_DATABASE_URL=... npx vitest run src/db`) | 1 | 9 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
 
@@ -192,12 +195,16 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 93.9% (139/148) | 84.1% (58/69) | 96.7% (29/30) | 93.8% (135/144) |
+| 96.1% (199/207) | 91.9% (113/123) | 97.0% (32/33) | 96.0% (191/199) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.
-Every other file is at 100% lines except `sessions/[id]/signups/route.ts`
-(96%, one uncovered line).
+Every other file is at 100% lines. The public signup logic itself lives in
+the `register_signup` PL/pgSQL function (a migration), which unit tests mock.
+[`src/db/register-signup.integration.test.ts`](src/db/register-signup.integration.test.ts)
+tests it against a real Postgres (row lock, 20-way race, courts read under
+the lock, duplicates, phone handling); it's skipped unless `INTEGRATION_DATABASE_URL` is set, and CI's
+e2e job runs it as the app role.
 
 These are enforced: [`vitest.config.mts`](vitest.config.mts) sets coverage
 thresholds of 91% statements, 81% branches, 94% functions and 91% lines (about
