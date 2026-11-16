@@ -5,7 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { Session, Signup, Pairing, Player } from "@/types";
 import { capacity } from "@/lib/session";
-import { MAX_NAME_LENGTH, MAX_PHONE_LENGTH } from "@/lib/player";
+// No maxLength on the name input: a returning player may pick a roster name
+// longer than MAX_NAME_LENGTH (allowed server-side), and truncating it would
+// silently turn them into a different player.
+import { MAX_PHONE_LENGTH } from "@/lib/player";
 import MapEmbed from "@/components/MapEmbed";
 
 function formatDate(dateStr: string) {
@@ -247,7 +250,6 @@ export default function SessionPage() {
                 list="known-players"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                maxLength={MAX_NAME_LENGTH}
                 required
                 placeholder="Select or type your name"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"

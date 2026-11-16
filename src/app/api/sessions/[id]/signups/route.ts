@@ -63,7 +63,12 @@ export async function POST(
 
   const trimmedName = name.trim();
   const trimmedPhone = (phone as string | null | undefined)?.trim() || null;
-  if (trimmedName.length > MAX_NAME_LENGTH) {
+  // The cap is for new names; a player already on the roster (from before the
+  // cap existed) can still sign up under their existing name.
+  if (
+    trimmedName.length > MAX_NAME_LENGTH &&
+    !(await prisma.player.findUnique({ where: { name: trimmedName }, select: { id: true } }))
+  ) {
     return NextResponse.json({ error: "Name is too long" }, { status: 400 });
   }
   if (trimmedPhone && trimmedPhone.length > MAX_PHONE_LENGTH) {

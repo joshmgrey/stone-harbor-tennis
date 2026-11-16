@@ -4,13 +4,15 @@ import type { NextRequest } from "next/server";
 const isAdmin = vi.fn();
 vi.mock("@/lib/auth", () => ({ isAdmin: () => isAdmin() }));
 
-const deleteFn = vi.fn();
-const update = vi.fn();
+const deleteMany = vi.fn();
+const updateMany = vi.fn();
+const findFirst = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     signup: {
-      delete: (a: unknown) => deleteFn(a),
-      update: (a: unknown) => update(a),
+      deleteMany: (a: unknown) => deleteMany(a),
+      updateMany: (a: unknown) => updateMany(a),
+      findFirst: (a: unknown) => findFirst(a),
     },
   },
 }));
@@ -21,19 +23,24 @@ const ctx = (id: string, signupId: string) => ({
   params: Promise.resolve({ id, signupId }),
 });
 
-const patchRequest = (body: unknown) =>
+const rawPatch = (body: string) =>
   new Request("http://localhost/api/sessions/1/signups/2", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   }) as unknown as NextRequest;
+
+const patchRequest = (body: unknown) => rawPatch(JSON.stringify(body));
 
 const req = {} as NextRequest;
 
 beforeEach(() => {
-  isAdmin.mockReset();
-  deleteFn.mockReset().mockResolvedValue({ id: 2 });
-  update.mockReset().mockImplementation((a) => ({ id: 2, ...a.data }));
+  isAdmin.mockReset().mockResolvedValue(true);
+  deleteMany.mockReset().mockResolvedValue({ count: 1 });
+  updateMany.mockReset().mockResolvedValue({ count: 1 });
+  findFirst
+    .mockReset()
+    .mockResolvedValue({ id: 2, session_id: 1, is_alternate: true, player: { id: 9 } });
 });
 
 describe("DELETE /api/sessions/:id/signups/:signupId", () => {
@@ -42,16 +49,22 @@ describe("DELETE /api/sessions/:id/signups/:signupId", () => {
 
     const res = await DELETE(req, ctx("1", "2"));
     expect(res.status).toBe(401);
-    expect(deleteFn).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
-  it("deletes the signup by numeric id for an admin", async () => {
-    isAdmin.mockResolvedValue(true);
-
+  it("deletes the signup scoped to its session for an admin", async () => {
     const res = await DELETE(req, ctx("1", "2"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(deleteFn).toHaveBeenCalledWith({ where: { id: 2 } });
+    expect(deleteMany).toHaveBeenCalledWith({ where: { id: 2, session_id: 1 } });
+  });
+
+  it("returns 404 when the signup is already gone or in another session", async () => {
+    deleteMany.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(req, ctx("999", "2"));
+    expect(res.status).toBe(404);
+    expect(deleteMany).toHaveBeenCalledWith({ where: { id: 2, session_id: 999 } });
   });
 });
 
@@ -61,46 +74,56 @@ describe("PATCH /api/sessions/:id/signups/:signupId", () => {
 
     const res = await PATCH(patchRequest({ is_alternate: true }), ctx("1", "2"));
     expect(res.status).toBe(401);
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("returns 400 when is_alternate is not a boolean", async () => {
-    isAdmin.mockResolvedValue(true);
-
     const res = await PATCH(patchRequest({ is_alternate: "yes" }), ctx("1", "2"));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       error: "is_alternate must be a boolean",
     });
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("moves a signup between regular and alternate for an admin", async () => {
-    isAdmin.mockResolvedValue(true);
+  it.each(["", "not json", "null"])("returns 400 for body %j", async (body) => {
+    const res = await PATCH(rawPatch(body), ctx("1", "2"));
+    expect(res.status).toBe(400);
+    expect(updateMany).not.toHaveBeenCalled();
+  });
 
+  it("moves a signup scoped to its session and returns it", async () => {
     const res = await PATCH(patchRequest({ is_alternate: true }), ctx("1", "2"));
     expect(res.status).toBe(200);
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 2 },
-        data: { is_alternate: true },
-      })
-    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 2, session_id: 1 },
+      data: { is_alternate: true },
+    });
+    expect(await res.json()).toMatchObject({ id: 2, is_alternate: true });
+  });
+
+  it("returns 404 when the signup is gone or in another session", async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await PATCH(patchRequest({ is_alternate: true }), ctx("999", "2"));
+    expect(res.status).toBe(404);
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });
 
-describe("malformed signup ids", () => {
-  it("DELETE returns 404 without deleting", async () => {
-    isAdmin.mockResolvedValue(true);
-    const res = await DELETE(req, ctx("1", "abc"));
+describe("malformed ids", () => {
+  it.each([
+    ["1", "abc"],
+    ["abc", "2"],
+  ])("DELETE (session %j, signup %j) returns 404 without deleting", async (id, signupId) => {
+    const res = await DELETE(req, ctx(id, signupId));
     expect(res.status).toBe(404);
-    expect(deleteFn).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
   it("PATCH returns 404 without updating", async () => {
-    isAdmin.mockResolvedValue(true);
     const res = await PATCH(patchRequest({ is_alternate: true }), ctx("1", "1e3"));
     expect(res.status).toBe(404);
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });

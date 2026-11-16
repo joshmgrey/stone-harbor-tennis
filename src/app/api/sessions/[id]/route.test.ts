@@ -11,7 +11,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     session: {
       findUnique: (a: unknown) => findUnique(a),
-      delete: (a: unknown) => deleteFn(a),
+      deleteMany: (a: unknown) => deleteFn(a),
     },
     signup: { findMany: (a: unknown) => findMany(a) },
   },
@@ -26,7 +26,7 @@ beforeEach(() => {
   isAdmin.mockReset();
   findUnique.mockReset();
   findMany.mockReset().mockResolvedValue([]);
-  deleteFn.mockReset().mockResolvedValue({ id: 1 });
+  deleteFn.mockReset().mockResolvedValue({ count: 1 });
 });
 
 describe("GET /api/sessions/:id", () => {
@@ -113,6 +113,14 @@ describe("DELETE /api/sessions/:id", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(deleteFn).toHaveBeenCalledWith({ where: { id: 1 } });
+  });
+
+  it("returns 404 when the session is already gone", async () => {
+    isAdmin.mockResolvedValue(true);
+    deleteFn.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(req, ctx("1"));
+    expect(res.status).toBe(404);
   });
 });
 

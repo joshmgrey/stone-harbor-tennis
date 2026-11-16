@@ -186,7 +186,7 @@ As of 2026-11-16 (`feat/plpgsql-register-signup`, branched from `main` @ `40a9d4
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 15 | 134 |
+| Unit (`npm test`) | 15 | 143 |
 | DB integration (`INTEGRATION_DATABASE_URL=... npx vitest run src/db`) | 1 | 9 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
@@ -195,7 +195,7 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 95.8% (182/190) | 90.8% (99/109) | 96.8% (30/31) | 95.7% (177/185) |
+| 96.1% (199/207) | 91.7% (111/121) | 97.0% (32/33) | 96.0% (190/198) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.

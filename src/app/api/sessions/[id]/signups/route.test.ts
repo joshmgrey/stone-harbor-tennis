@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 const queryRaw = vi.fn();
+const playerFindUnique = vi.fn();
 
 // The player upsert, duplicate check, capacity check and insert run inside
 // the `register_signup` PL/pgSQL function, called via `prisma.$queryRaw`.
@@ -10,6 +11,7 @@ const queryRaw = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     $queryRaw: (...a: unknown[]) => queryRaw(...a),
+    player: { findUnique: (a: unknown) => playerFindUnique(a) },
   },
 }));
 
@@ -55,6 +57,7 @@ const registerReturns = (status: string) =>
 const registerArgs = () => queryRaw.mock.calls[0].slice(1);
 
 beforeEach(() => {
+  playerFindUnique.mockReset().mockResolvedValue(null);
   queryRaw.mockReset().mockResolvedValue([createdRow]);
 });
 
@@ -189,11 +192,29 @@ describe("POST /api/sessions/:id/signups", () => {
 });
 
 describe("length limits", () => {
-  it("rejects a name longer than MAX_NAME_LENGTH with 400", async () => {
+  it("rejects a new name longer than MAX_NAME_LENGTH with 400", async () => {
     const res = await POST(jsonRequest({ name: "a".repeat(81) }), ctx("1"));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Name is too long" });
     expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("lets an existing player with a longer name still sign up", async () => {
+    playerFindUnique.mockResolvedValue({ id: 10 });
+    const longName = "a".repeat(85);
+
+    const res = await POST(jsonRequest({ name: longName }), ctx("1"));
+    expect(res.status).toBe(201);
+    expect(playerFindUnique).toHaveBeenCalledWith({
+      where: { name: longName },
+      select: { id: true },
+    });
+    expect(registerArgs()[1]).toBe(longName);
+  });
+
+  it("doesn't look up the roster for names within the limit", async () => {
+    await POST(jsonRequest({ name: "Alice" }), ctx("1"));
+    expect(playerFindUnique).not.toHaveBeenCalled();
   });
 
   it("rejects a phone longer than MAX_PHONE_LENGTH with 400", async () => {

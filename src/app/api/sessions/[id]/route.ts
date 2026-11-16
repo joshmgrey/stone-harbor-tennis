@@ -53,6 +53,10 @@ export async function DELETE(
   if (id === null) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
-  await prisma.session.delete({ where: { id } });
+  // deleteMany so an already-deleted session is a 404, not a thrown P2025 / 500.
+  const { count } = await prisma.session.deleteMany({ where: { id } });
+  if (count === 0) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }
