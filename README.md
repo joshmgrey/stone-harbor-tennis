@@ -180,11 +180,11 @@ mocked at the module boundary.
 
 ### Test and coverage numbers
 
-As of 2026-10-12 (`main` @ `1a53447`), all passing:
+As of 2026-11-16 (`feat/plpgsql-register-signup`, branched from `main` @ `40a9d4b`), all passing:
 
 | Suite | Files | Tests |
 |---|---|---|
-| Unit (`npm test`) | 13 | 76 |
+| Unit (`npm test`) | 13 | 78 |
 | Infra CDK (`cd infra && npm test`) | 3 | 28 |
 | End-to-end (`npm run e2e`) | 1 | 1 full happy path |
 
@@ -192,12 +192,13 @@ Unit coverage (`npm run coverage`, V8, over `src/lib/**` and `src/app/api/**`):
 
 | Statements | Branches | Functions | Lines |
 |---|---|---|---|
-| 93.9% (139/148) | 84.1% (58/69) | 96.7% (29/30) | 93.8% (135/144) |
+| 94.4% (134/142) | 84.1% (53/63) | 96.6% (28/29) | 94.2% (130/138) |
 
 Most of the gap is [`src/lib/prisma.ts`](src/lib/prisma.ts) (0%): the Prisma
 client singleton, which every test mocks out. It's covered end to end instead.
-Every other file is at 100% lines except `sessions/[id]/signups/route.ts`
-(96%, one uncovered line).
+Every other file is at 100% lines. The signup capacity logic itself lives in
+the `register_signup` PL/pgSQL function (a migration), which unit tests mock;
+`scripts/load-test-signup.js` exercises it against a real Postgres.
 
 These are enforced: [`vitest.config.mts`](vitest.config.mts) sets coverage
 thresholds of 91% statements, 81% branches, 94% functions and 91% lines (about
