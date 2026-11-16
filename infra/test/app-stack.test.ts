@@ -1,4 +1,4 @@
-import { beforeAll, describe, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import * as cdk from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack, type AppStackProps } from "../lib/app-stack";
@@ -10,8 +10,6 @@ const BASE: Omit<AppStackProps, "env"> = {
   hostedZoneId: "Z0123456789ABCDEFGHIJ",
   zoneName: "stoneharbortennis.com",
   googleMapsApiKey: "",
-  dbMasterSecretArn:
-    "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/rds/master-AbCdEf",
   appDatabaseUrlSecretArn:
     "arn:aws:secretsmanager:us-east-2:123456789012:secret:stone-harbor-tennis/app/app-database-url-AbCdEf",
   authSecretArn:
@@ -59,30 +57,14 @@ describe("AppStack", () => {
     });
   });
 
-  it("defines a separate migrator task that migrates, then syncs the app role", () => {
-    template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
-    template.hasResourceProperties("AWS::ECS::TaskDefinition", {
-      ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({
-          Name: "migrate",
-          Command: ["node", "scripts/migrate.mjs"],
-        }),
-      ]),
-    });
+  it("has only the service task; the migrator lives in MigratorStack", () => {
+    template.resourceCountIs("AWS::ECS::TaskDefinition", 1);
+    const json = JSON.stringify(template.toJSON());
+    expect(json).not.toContain("DB_MASTER_SECRET");
+    expect(json).not.toContain("rds/master");
   });
 
-  it("gives the master secret to the migrator only; the service runs as the app role", () => {
-    template.hasResourceProperties("AWS::ECS::TaskDefinition", {
-      ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({
-          Name: "migrate",
-          Secrets: [
-            { Name: "DB_MASTER_SECRET", ValueFrom: BASE.dbMasterSecretArn },
-            { Name: "APP_DATABASE_URL", ValueFrom: BASE.appDatabaseUrlSecretArn },
-          ],
-        }),
-      ]),
-    });
+  it("runs the service as the least-privilege app role", () => {
     template.hasResourceProperties("AWS::ECS::TaskDefinition", {
       ContainerDefinitions: Match.arrayWith([
         Match.objectLike({
@@ -156,13 +138,8 @@ describe("AppStack", () => {
     });
   });
 
-  it("exports what the migrate workflow reads back via describe-stacks", () => {
-    for (const key of [
-      "ClusterName",
-      "MigratorTaskDefinitionArn",
-      "TaskSubnetIds",
-      "ServiceSecurityGroupId",
-    ]) {
+  it("exports where run-migrator.sh runs the migrator task", () => {
+    for (const key of ["ClusterName", "TaskSubnetIds", "ServiceSecurityGroupId"]) {
       template.hasOutput(key, Match.anyValue());
     }
   });

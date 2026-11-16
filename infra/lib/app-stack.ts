@@ -27,20 +27,13 @@ export interface AppStackProps extends cdk.StackProps {
   readonly googleMapsApiKey: string;
 
   /**
-   * The RDS master secret (`stone-harbor-tennis/rds/master`): JSON with
-   * `username`/`password` plus the `host`/`port` the RDS attachment merges
-   * in. DatabaseStack sets the instance's password from this same secret, so
-   * it is the only copy of the master password. Only the migrator reads it
-   * (scripts/migrate.mjs derives the owner URL from it).
-   */
-  readonly dbMasterSecretArn: string;
-
-  /**
    * Secrets Manager ARN holding the connection string for the app's
    * least-privilege role (`postgresql://tennis_app:<pw>@<host>/<db>`). The
-   * service connects with it; the migrator creates/refreshes that role from
-   * it after every `migrate deploy` (scripts/sync-app-db-role.mjs), so this
-   * secret is the only copy of that password.
+   * service connects with it; the migrator (MigratorStack) creates/refreshes
+   * that role from it after every `migrate deploy`
+   * (scripts/sync-app-db-role.mjs), so this secret is the only copy of that
+   * password. The master secret isn't an AppStack prop at all: only
+   * MigratorStack references it.
    */
   readonly appDatabaseUrlSecretArn: string;
 
@@ -81,11 +74,6 @@ export class AppStack extends cdk.Stack {
       validation: acm.CertificateValidation.fromDns(zone),
     });
 
-    const dbMaster = secretsmanager.Secret.fromSecretCompleteArn(
-      this,
-      "DbMasterSecret",
-      props.dbMasterSecretArn,
-    );
     const appDatabaseUrl = secretsmanager.Secret.fromSecretCompleteArn(
       this,
       "AppDatabaseUrlSecret",
@@ -179,34 +167,9 @@ export class AppStack extends cdk.Stack {
     const serviceSg = service.service.connections.securityGroups[0];
     this.serviceSecurityGroupId = serviceSg.securityGroupId;
 
-    // -------------------------------------------------------------------
-    // Migrator task — `prisma migrate deploy` as a one-off Fargate task.
-    // -------------------------------------------------------------------
-    // Once the DB is private (B4), CI can't reach it, so migrations run
-    // in-VPC. Uses the `migrator` image (full toolchain) and the service's
-    // own SG, so it's allowed through the RDS security group. Run it from
-    // `.github/workflows/migrate.yml` (manual) — schema changes are rare and
-    // deliberate, and don't belong in every routine deploy.
-    const migratorTask = new ecs.FargateTaskDefinition(this, "MigratorTask", {
-      cpu: 256,
-      memoryLimitMiB: 512,
-    });
-    migratorTask.addContainer("migrate", {
-      image: ecs.ContainerImage.fromAsset(path.join(__dirname, "..", ".."), {
-        file: "Dockerfile",
-        target: "migrator",
-        platform: ecrAssets.Platform.LINUX_AMD64,
-      }),
-      // Migrate as the owner (URL derived from the master secret JSON),
-      // then bring the app role in line with APP_DATABASE_URL.
-      command: ["node", "scripts/migrate.mjs"],
-      environment: { NODE_ENV: "production" },
-      secrets: {
-        DB_MASTER_SECRET: ecs.Secret.fromSecretsManager(dbMaster),
-        APP_DATABASE_URL: ecs.Secret.fromSecretsManager(appDatabaseUrl),
-      },
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "migrate", logGroup }),
-    });
+    // The migrator task lives in MigratorStack (lib/migrator-stack.ts) so a
+    // deploy can run migrations BEFORE this stack rolls the service onto new
+    // code. It runs in this cluster with the service SG; see the outputs below.
 
     // B3 — the cutover. Point the apex and www at the ALB.
     //
@@ -246,11 +209,9 @@ export class AppStack extends cdk.Stack {
       description: "put in db:appSecurityGroupId context for B4",
     });
 
-    // Consumed by .github/workflows/migrate.yml via `describe-stacks`.
+    // Where the MigratorStack task runs. Read by .github/scripts/run-migrator.sh
+    // via `describe-stacks` (along with ServiceSecurityGroupId above).
     new cdk.CfnOutput(this, "ClusterName", { value: cluster.clusterName });
-    new cdk.CfnOutput(this, "MigratorTaskDefinitionArn", {
-      value: migratorTask.taskDefinitionArn,
-    });
     new cdk.CfnOutput(this, "TaskSubnetIds", {
       value: vpc.publicSubnets.map((s) => s.subnetId).join(","),
     });

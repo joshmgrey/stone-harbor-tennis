@@ -128,7 +128,12 @@ export class GitHubDeployStack extends cdk.Stack {
       new iam.PolicyStatement({
         sid: "PassEcsTaskRoles",
         actions: ["iam:PassRole"],
-        resources: [`arn:aws:iam::${this.account}:role/AppStack-*`],
+        // The migrator task's roles live in MigratorStack (deploy.yml runs it
+        // before rolling AppStack); AppStack-* is kept for the service.
+        resources: [
+          `arn:aws:iam::${this.account}:role/AppStack-*`,
+          `arn:aws:iam::${this.account}:role/MigratorStack-*`,
+        ],
         conditions: {
           StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" },
         },

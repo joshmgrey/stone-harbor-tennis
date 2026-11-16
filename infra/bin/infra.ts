@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { DatabaseStack } from "../lib/database-stack";
 import { GitHubDeployStack } from "../lib/github-deploy-stack";
 import { AppStack } from "../lib/app-stack";
+import { MigratorStack } from "../lib/migrator-stack";
 
 const app = new cdk.App();
 
@@ -122,8 +123,16 @@ if (opt("app:appDatabaseUrlSecretArn")) {
     hostedZoneId: req("app:hostedZoneId"),
     zoneName: req("app:zoneName"),
     googleMapsApiKey: opt("app:googleMapsApiKey") ?? "",
-    dbMasterSecretArn: req("app:dbMasterSecretArn"),
     appDatabaseUrlSecretArn: req("app:appDatabaseUrlSecretArn"),
     authSecretArn: req("app:authSecretArn"),
+  });
+
+  // The migrator, in its own stack so deploy.yml can deploy and run it
+  // before `cdk deploy AppStack` rolls the service onto new code.
+  new MigratorStack(app, "MigratorStack", {
+    env,
+    description: "Path B: one-off Fargate task that runs prisma migrate deploy",
+    dbMasterSecretArn: req("app:dbMasterSecretArn"),
+    appDatabaseUrlSecretArn: req("app:appDatabaseUrlSecretArn"),
   });
 }
