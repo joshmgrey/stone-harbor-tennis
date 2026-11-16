@@ -55,17 +55,23 @@ show_logs() {
 # One field of the task, retrying transient API errors (throttling, network
 # blips) so a single failed poll can't abort the wait mid-migration. Prints
 # the value; returns non-zero only after every attempt failed.
+#
+# stderr is kept separate: a warning the CLI prints on a successful call
+# must not end up in the value (e.g. a status that never equals STOPPED).
 task_field() {
-  local attempt out
+  local attempt out errf
+  errf=$(mktemp)
   for attempt in 1 2 3 4 5; do
     if out=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$arn" \
-        --query "tasks[0].$1" --output text 2>&1); then
+        --query "tasks[0].$1" --output text 2>"$errf"); then
+      rm -f "$errf"
       echo "$out"
       return 0
     fi
-    echo "describe-tasks failed (attempt $attempt/5): $out" >&2
+    echo "describe-tasks failed (attempt $attempt/5): $(cat "$errf")" >&2
     sleep $(( attempt * 5 ))
   done
+  rm -f "$errf"
   return 1
 }
 
@@ -84,6 +90,11 @@ timeout=${MIGRATOR_TIMEOUT_SECONDS:-1800}
 while :; do
   status=$(task_field lastStatus) || give_up "Couldn't read the migrator task's status. $still_running"
   [ "$status" = "STOPPED" ] && break
+  # describe-tasks succeeds but returns no task (reported under `failures`
+  # as MISSING): waiting won't change that, so fail now.
+  if [ "$status" = "None" ] || [ -z "$status" ]; then
+    give_up "ECS doesn't know the migrator task (not found)."
+  fi
   if (( $(date +%s) - started >= timeout )); then
     give_up "Migrator task still $status after ${timeout}s. $still_running"
   fi
