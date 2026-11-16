@@ -69,7 +69,7 @@ task_field() {
       return 0
     fi
     echo "describe-tasks failed (attempt $attempt/5): $(cat "$errf")" >&2
-    sleep $(( attempt * 5 ))
+    (( attempt < 5 )) && sleep $(( attempt * 5 ))
   done
   rm -f "$errf"
   return 1
@@ -91,9 +91,14 @@ while :; do
   status=$(task_field lastStatus) || give_up "Couldn't read the migrator task's status. $still_running"
   [ "$status" = "STOPPED" ] && break
   # describe-tasks succeeds but returns no task (reported under `failures`
-  # as MISSING): waiting won't change that, so fail now.
+  # as MISSING). The ECS API is eventually consistent, so a task that was
+  # just started can briefly look missing: only give up after a grace
+  # period, not on the first poll.
   if [ "$status" = "None" ] || [ -z "$status" ]; then
-    give_up "ECS doesn't know the migrator task (not found)."
+    if (( $(date +%s) - started >= ${MIGRATOR_MISSING_GRACE_SECONDS:-60} )); then
+      give_up "ECS still doesn't know the migrator task (not found). $still_running"
+    fi
+    echo "task not visible yet; waiting" >&2
   fi
   if (( $(date +%s) - started >= timeout )); then
     give_up "Migrator task still $status after ${timeout}s. $still_running"
