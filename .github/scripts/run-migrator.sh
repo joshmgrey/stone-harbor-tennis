@@ -52,32 +52,51 @@ show_logs() {
   aws logs tail "$LOG_GROUP" --since "${mins}m" --format short || true
 }
 
+# One field of the task, retrying transient API errors (throttling, network
+# blips) so a single failed poll can't abort the wait mid-migration. Prints
+# the value; returns non-zero only after every attempt failed.
 task_field() {
-  aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$arn" \
-    --query "tasks[0].$1" --output text
+  local attempt out
+  for attempt in 1 2 3 4 5; do
+    if out=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$arn" \
+        --query "tasks[0].$1" --output text 2>&1); then
+      echo "$out"
+      return 0
+    fi
+    echo "describe-tasks failed (attempt $attempt/5): $out" >&2
+    sleep $(( attempt * 5 ))
+  done
+  return 1
 }
+
+# Fail the run without touching the task, and show what it logged.
+give_up() {
+  echo "::error::$1 Task: $arn"
+  show_logs
+  exit 1
+}
+still_running="It was NOT stopped (a migration may be mid-flight); check it in the ECS console before re-running."
 
 # Poll instead of `aws ecs wait tasks-stopped`, which gives up after ~10 min
 # (100 x 6s). Long migrations or slow image pulls get MIGRATOR_TIMEOUT_SECONDS
 # (default 30 min).
 timeout=${MIGRATOR_TIMEOUT_SECONDS:-1800}
 while :; do
-  status=$(task_field lastStatus)
+  status=$(task_field lastStatus) || give_up "Couldn't read the migrator task's status. $still_running"
   [ "$status" = "STOPPED" ] && break
   if (( $(date +%s) - started >= timeout )); then
-    echo "::error::migrator task still $status after ${timeout}s; it was NOT stopped (a migration may be mid-flight). Check it in the ECS console before re-running: $arn"
-    show_logs
-    exit 1
+    give_up "Migrator task still $status after ${timeout}s. $still_running"
   fi
   sleep 10
 done
 
-code=$(task_field 'containers[0].exitCode')
-reason=$(task_field 'containers[0].reason')
+lookup_failed="Couldn't read the stopped migrator task's result."
+code=$(task_field 'containers[0].exitCode') || give_up "$lookup_failed"
+reason=$(task_field 'containers[0].reason') || give_up "$lookup_failed"
 # Set when the container never started (image pull, secrets, capacity) —
 # then there's no exit code and the cause is only here.
-stop_code=$(task_field stopCode)
-stopped_reason=$(task_field stoppedReason)
+stop_code=$(task_field stopCode) || give_up "$lookup_failed"
+stopped_reason=$(task_field stoppedReason) || give_up "$lookup_failed"
 echo "exit code: $code  container reason: $reason"
 echo "stop code: $stop_code  stopped reason: $stopped_reason"
 

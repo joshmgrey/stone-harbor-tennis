@@ -263,12 +263,16 @@ target from the output above.
 
 ## B4 — database private
 
-Order after merging:
+Order after merging (as it was done at the time; steps 1–2 describe the
+setup back then: the migrator has since moved to `MigratorStack` and
+`deploy.yml` runs it before every rollout, see
+[Migrations, from here on](#migrations-from-here-on)):
 
 1. **`cdk deploy GitHubDeployStack`** (laptop) — the role gains `ecs:RunTask`
    / `iam:PassRole` for the migrator task. Approve the IAM prompt.
 2. `deploy.yml` runs on the merge → `AppStack` gains the **migrator task
-   definition** and its outputs. (No migrate step in `deploy.yml` any more.)
+   definition** and its outputs. (At the time, `deploy.yml` had no migrate
+   step.)
 3. **`cdk deploy DatabaseStack`** (laptop) — `publiclyAccessible: false` +
    a CDK-managed SG admitting 5432 only from `db:appSecurityGroupId`
    (`sg-XXXXXXXX`, the `ServiceSecurityGroupId` output). Approve the
