@@ -115,14 +115,17 @@ describe("GitHubDeployStack", () => {
     });
   });
 
-  it("scopes iam:PassRole to AppStack task roles for ECS only", () => {
+  it("scopes iam:PassRole to AppStack and MigratorStack task roles for ECS only", () => {
     synth().hasResourceProperties("AWS::IAM::Policy", {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
             Sid: "PassEcsTaskRoles",
             Action: "iam:PassRole",
-            Resource: "arn:aws:iam::123456789012:role/AppStack-*",
+            Resource: [
+              "arn:aws:iam::123456789012:role/AppStack-*",
+              "arn:aws:iam::123456789012:role/MigratorStack-*",
+            ],
             Condition: {
               StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" },
             },

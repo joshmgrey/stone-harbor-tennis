@@ -1,12 +1,12 @@
 name: migrate
 
 # Path B / B4 — `prisma migrate deploy` against the (now private) RDS
-# instance, as a one-off Fargate task inside the VPC. Run this by hand
-# (Actions -> migrate -> Run workflow) after merging a change that adds a
-# migration, BEFORE it matters — schema changes are rare and deliberate.
+# instance, as a one-off Fargate task inside the VPC.
 #
-# The task definition + network details come from AppStack, so deploy.yml
-# must have run for this commit first.
+# deploy.yml already runs this before every app rollout, so you normally
+# don't need it. It's for re-running a migration by hand (e.g. after fixing
+# a failed one) or the first migration of a brand-new environment. It runs
+# the migrator task definition from the last deploy of MigratorStack.
 
 on:
   workflow_dispatch:
@@ -25,44 +25,15 @@ jobs:
     environment: production
     if: vars.APP_DATABASE_URL_SECRET_ARN != ''
     steps:
+      - uses: actions/checkout@v5
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-2
 
       - name: Run the migrator task
-        run: |
-          set -euo pipefail
-
-          out=$(aws cloudformation describe-stacks --stack-name AppStack \
-            --query 'Stacks[0].Outputs' --output json)
-          get() { echo "$out" | jq -r --arg k "$1" '.[]|select(.OutputKey==$k).OutputValue'; }
-          CLUSTER=$(get ClusterName)
-          TASKDEF=$(get MigratorTaskDefinitionArn)
-          SUBNETS=$(get TaskSubnetIds)
-          SG=$(get ServiceSecurityGroupId)
-
-          echo "cluster=$CLUSTER  taskdef=$TASKDEF"
-
-          arn=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --task-definition "$TASKDEF" \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
-            --started-by "gha-migrate" \
-            --query 'tasks[0].taskArn' --output text)
-          echo "task: $arn"
-
-          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$arn"
-
-          read -r code reason < <(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$arn" \
-            --query 'tasks[0].containers[0].[exitCode,reason]' --output text)
-          echo "exit code: $code  reason: $reason"
-
-          if [ "$code" != "0" ]; then
-            echo "::error::migration task failed"
-            aws logs tail "$(aws cloudformation describe-stack-resources --stack-name AppStack \
-              --query "StackResources[?ResourceType=='AWS::Logs::LogGroup'].PhysicalResourceId" \
-              --output text)" --since 15m --format short || true
-            exit 1
-          fi
+        # Same script deploy.yml runs before rolling AppStack. Uses the
+        # migrator task definition MigratorStack currently has (i.e. from the
+        # last deploy).
+        run: bash .github/scripts/run-migrator.sh

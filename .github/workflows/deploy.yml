@@ -1,11 +1,21 @@
 name: deploy
 
-# Path B — deploy the Fargate app on merge to main: `cdk deploy AppStack`
-# (builds the Docker image asset, updates ECS). Auth is GitHub OIDC into the
-# role from GitHubDeployStack — no stored keys.
+# Path B — deploy the Fargate app on merge to main. Auth is GitHub OIDC into
+# the role from GitHubDeployStack — no stored keys.
 #
-# Migrations are NOT here — run `migrate.yml` by hand when a change ships a
-# new migration (rare, deliberate, and the DB is private as of B4).
+# Order matters: migrations run BEFORE the service rolls onto new code, so new
+# code never serves against an old schema (a merge that added a function the
+# app calls once caused ~3 min of failed signups when the app went first):
+#
+#   1. cdk deploy MigratorStack   (migrator image + task def for this commit)
+#   2. run the migrator task      (prisma migrate deploy + app-role sync;
+#                                  a no-op when there's nothing new)
+#   3. cdk deploy AppStack        (new app image; ECS rolling deploy)
+#
+# A failed migration stops here, before step 3, and the live app keeps running
+# the previous version. Migrations must stay backward compatible (additive)
+# with the version still serving while they run. migrate.yml still exists for
+# manual runs.
 
 on:
   push:
@@ -24,6 +34,7 @@ on:
       - "infra/**"
       - ".github/workflows/deploy.yml"
       - ".github/scripts/smoke-test.sh"
+      - ".github/scripts/run-migrator.sh"
   workflow_dispatch:
 
 concurrency:
@@ -57,19 +68,43 @@ jobs:
       - name: Install infra dependencies
         run: npm --prefix infra ci
 
-      - name: Deploy AppStack
+      # One step so the steps share the CDK context; each phase is a log group.
+      - name: Deploy (migrator -> migrate -> app)
         working-directory: infra
         run: |
-          npx cdk deploy AppStack --require-approval never \
-            -c env:account='${{ vars.AWS_ACCOUNT_ID }}' \
-            -c env:region=us-east-2 \
-            -c app:vpcId='${{ vars.VPC_ID }}' \
-            -c app:hostedZoneId='${{ vars.HOSTED_ZONE_ID }}' \
-            -c app:zoneName='${{ vars.ZONE_NAME }}' \
-            -c app:googleMapsApiKey='${{ secrets.GOOGLE_MAPS_API_KEY }}' \
-            -c app:dbMasterSecretArn='${{ vars.DB_MASTER_SECRET_ARN }}' \
-            -c app:appDatabaseUrlSecretArn='${{ vars.APP_DATABASE_URL_SECRET_ARN }}' \
+          set -euo pipefail
+          # Every stack in bin/infra.ts is synthesized, so every app:* value
+          # is needed even when deploying just one of them.
+          ctx=(
+            -c env:account='${{ vars.AWS_ACCOUNT_ID }}'
+            -c env:region=us-east-2
+            -c app:vpcId='${{ vars.VPC_ID }}'
+            -c app:hostedZoneId='${{ vars.HOSTED_ZONE_ID }}'
+            -c app:zoneName='${{ vars.ZONE_NAME }}'
+            -c app:googleMapsApiKey='${{ secrets.GOOGLE_MAPS_API_KEY }}'
+            -c app:dbMasterSecretArn='${{ vars.DB_MASTER_SECRET_ARN }}'
+            -c app:appDatabaseUrlSecretArn='${{ vars.APP_DATABASE_URL_SECRET_ARN }}'
             -c app:authSecretArn='${{ vars.AUTH_SECRET_ARN }}'
+          )
+
+          echo "::group::1. cdk deploy MigratorStack"
+          npx cdk deploy MigratorStack --require-approval never "${ctx[@]}"
+          echo "::endgroup::"
+
+          echo "::group::2. Run migrations"
+          # The migrator runs in AppStack's cluster/SG. On a brand-new
+          # environment AppStack doesn't exist yet: skip, then run migrate.yml
+          # once after this deploy creates it.
+          if aws cloudformation describe-stacks --stack-name AppStack >/dev/null 2>&1; then
+            bash ../.github/scripts/run-migrator.sh
+          else
+            echo "::warning::AppStack doesn't exist yet; skipping migrations. Run migrate.yml after this deploy."
+          fi
+          echo "::endgroup::"
+
+          echo "::group::3. cdk deploy AppStack"
+          npx cdk deploy AppStack --require-approval never "${ctx[@]}"
+          echo "::endgroup::"
 
       # Black-box check that the new revision is actually serving on the public
       # domain — DNS -> ALB -> task, from outside AWS. ECS already gates the

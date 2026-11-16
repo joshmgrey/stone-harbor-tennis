@@ -10,7 +10,8 @@ service's security group), and Amplify is gone.
 |---|---|---|
 | `DatabaseStack` | the RDS instance (adopted via `cdk import`) + its SG, admitting `5432` only from the app SG | laptop |
 | `GitHubDeployStack` | GitHub OIDC provider + the role CI assumes | laptop (rarely) |
-| `AppStack` | ECR image, Fargate service, ALB, ACM cert, Route 53 records, migrator task | CI (`deploy.yml`) |
+| `AppStack` | ECR image, Fargate service, ALB, ACM cert, Route 53 records | CI (`deploy.yml`) |
+| `MigratorStack` | migrator image + one-off Fargate task definition (`prisma migrate deploy`) | CI (`deploy.yml`, before AppStack) |
 
 Day-to-day operations: [migrations](#migrations-from-here-on),
 [database credentials](#database-credentials-one-secret-per-password) (incl.
@@ -26,7 +27,8 @@ Those steps are done; keep them for reference or a rebuild.
 infra/
 ├── bin/infra.ts                 CDK app entrypoint; wires context -> stacks
 ├── lib/database-stack.ts        RDS instance (described for import) + its SG
-├── lib/app-stack.ts             Fargate service, ALB, DNS, migrator task
+├── lib/app-stack.ts             Fargate service, ALB, DNS
+├── lib/migrator-stack.ts        migrator task (run before each app rollout)
 ├── lib/github-deploy-stack.ts   OIDC provider + CI deploy role
 ├── test/*.test.ts               CDK assertion tests (`npm test`)
 ├── cdk.json                     app command + feature flags (committed)
@@ -279,24 +281,48 @@ longer used — B5 deletes it.
 
 ### Migrations, from here on
 
-`.github/workflows/migrate.yml` (**Actions → migrate → Run workflow**) runs
-`prisma migrate deploy` as a one-off Fargate task in the VPC.
+**`deploy.yml` runs migrations itself, before the app rolls out.** The
+migrator task lives in its own stack, [`MigratorStack`](lib/migrator-stack.ts),
+so each deploy can:
 
-**`migrate.yml` uses the migrator task definition from AppStack's current
-outputs** — i.e. the image from the last completed `cdk deploy`. So:
+1. `cdk deploy MigratorStack` — the migrator image + task definition for
+   this commit;
+2. run it ([`.github/scripts/run-migrator.sh`](../.github/scripts/run-migrator.sh))
+   as a one-off Fargate task in AppStack's cluster, with the service SG;
+   `prisma migrate deploy` is a no-op when nothing is pending;
+3. `cdk deploy AppStack` — only now does the service roll onto new code.
 
-- **Run it only AFTER `deploy.yml` for that commit has finished.** Run it
-  during the deploy and it runs the *old* migrator image → "no pending
-  migrations" → nothing happens.
-- **If new code depends on the new column, split the change into two PRs:**
-  1. PR A — the migration only (`schema.prisma` + `prisma/migrations/...`).
-     Merge → wait for `deploy.yml` → run `migrate.yml`. The running app
-     selects explicit columns, so an added column is invisible to it — no
-     errors during the gap.
-  2. PR B — the code that uses the new column. Merge → deploy.
+A failed migration stops the deploy before step 3; the live app keeps running
+the previous version. So a migration and the code that depends on it can ship
+in **one** PR.
 
-  Ship both together and there's a window (~10 min) where the new app is
-  live but the migration hasn't run and DB pages 500.
+Before this, the migrator was in AppStack and ran by hand after the deploy,
+so new code briefly served against the old schema. Shipping a migration with
+code that needed it (PR #60) took signups down for ~3 minutes until
+`migrate.yml` ran.
+
+Rules that still apply:
+
+- **Keep migrations backward compatible with the version that's serving**
+  while they run: add columns/tables/functions; don't drop or rename
+  something the current code uses in the same deploy (do that in a later
+  PR once nothing reads it).
+- `.github/workflows/migrate.yml` (**Actions → migrate → Run workflow**) runs
+  the same script by hand: to retry a failed migration, or for the first
+  migration in a brand-new environment (where AppStack didn't exist yet when
+  step 2 ran).
+
+#### Rolling this out (one time)
+
+The CI role may only pass `AppStack-*` roles to ECS, and MigratorStack's
+roles are `MigratorStack-*`. So, **before merging the change that adds
+MigratorStack**:
+
+1. **`cdk deploy GitHubDeployStack`** (laptop) — `iam:PassRole` gains
+   `role/MigratorStack-*`. Approve the IAM prompt.
+2. Merge → `deploy.yml` creates MigratorStack, runs the migrator (nothing
+   pending), then updates AppStack, which deletes its old migrator task
+   definition.
 
 Your laptop can't reach the DB directly; for `psql` / `prisma studio` you'd
 tunnel through a bastion (not set up — add if you need it).

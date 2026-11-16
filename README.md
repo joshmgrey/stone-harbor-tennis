@@ -225,7 +225,8 @@ checked against the properties that matter:
 | Stack | Asserts, among other things |
 |---|---|
 | [`DatabaseStack`](infra/lib/database-stack.ts) | RDS instance is `PubliclyAccessible: false`, encrypted, deletion-protected, `RETAIN` on stack delete; its security group admits `5432` only from the app SG, never a CIDR |
-| [`AppStack`](infra/lib/app-stack.ts) | one Fargate task, circuit-breaker rollback, ALB HTTPS + HTTP→HTTPS redirect, `/api/health` target-group check, a separate migrator task running `prisma migrate deploy`, the outputs `migrate.yml` reads |
+| [`AppStack`](infra/lib/app-stack.ts) | one Fargate task, circuit-breaker rollback, ALB HTTPS + HTTP→HTTPS redirect, `/api/health` target-group check, the cluster/subnet/SG outputs the migrator runs with |
+| [`MigratorStack`](infra/lib/migrator-stack.ts) | the one-off migrator task (`prisma migrate deploy` + app-role sync); the only stack that references the RDS master secret |
 | [`GitHubDeployStack`](infra/lib/github-deploy-stack.ts) | OIDC trust is scoped to this repo's `main` ref and `production` environment; the role can only assume the CDK bootstrap roles and read `stone-harbor-tennis/*` secrets |
 
 No AWS credentials — VPC lookups resolve to a dummy VPC and the Docker image
@@ -268,8 +269,8 @@ In CI the `e2e` job starts a `postgres:17` service container, runs
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | every PR + push to `main` | `typecheck` / `lint` / `test` matrix, an `infra` job (CDK assertion tests), an `e2e` job (Playwright against a Postgres service container), and a `coverage` job that uploads its report as an artifact |
 | [`docker-build.yml`](.github/workflows/docker-build.yml) | PRs touching the image, deps, or `src/` | builds the runner + migrator images and smoke-tests `GET /api/health` against the running container |
-| [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy AppStack` (see [Deployment](#deployment-aws)), then a post-deploy smoke test that polls the live domain — `/api/health` (body checked), `/api/sessions` (exercises RDS), and `/` (SSR) — and fails the run if the site isn't serving |
-| [`migrate.yml`](.github/workflows/migrate.yml) | manual | `prisma migrate deploy` as a one-off Fargate task |
+| [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | `cdk deploy MigratorStack` → run migrations → `cdk deploy AppStack` (see [Deployment](#deployment-aws)), then a post-deploy smoke test that polls the live domain — `/api/health` (body checked), `/api/sessions` (exercises RDS), and `/` (SSR) — and fails the run if the site isn't serving |
+| [`migrate.yml`](.github/workflows/migrate.yml) | manual | re-runs the migrator by hand (`deploy.yml` already migrates before every rollout) |
 
 A full run of `deploy.yml` on `main` has gone green end to end: `cdk deploy
 AppStack` updated the ECS service, and the post-deploy smoke test then reached
@@ -318,7 +319,8 @@ Route 53 (apex, www, new.) ─▶ ALB (HTTPS, ACM) ─▶ Fargate service ─▶
 ```
 
 - **`DatabaseStack`** — the RDS instance (adopted via `cdk import`), `publiclyAccessible: false`, security group admits `5432` only from the Fargate service. Deployed from a laptop.
-- **`AppStack`** — ECR image, ECS Fargate service behind an ALB, ACM cert, Route 53 records, and a one-off migrator task. Deployed by CI.
+- **`AppStack`** — ECR image, ECS Fargate service behind an ALB, ACM cert, Route 53 records. Deployed by CI.
+- **`MigratorStack`** — the one-off migrator task. CI deploys and runs it before rolling out AppStack, so migrations land before new code serves.
 - **`GitHubDeployStack`** — GitHub OIDC provider + the role CI assumes (no stored AWS keys).
 
 ### Runtime config
@@ -335,6 +337,6 @@ Secrets Manager, injected into the container by ECS (never in the task definitio
 
 ### Deploying
 
-- **App**: push to `main` → `.github/workflows/deploy.yml` builds the image, runs `cdk deploy AppStack`, then smoke-tests the live domain (`/api/health`, `/api/sessions`, `/`) and fails the run if the new revision isn't serving.
+- **App**: push to `main` → `.github/workflows/deploy.yml` deploys MigratorStack and runs pending migrations, then runs `cdk deploy AppStack` (so new code never serves before its migration), then smoke-tests the live domain (`/api/health`, `/api/sessions`, `/`) and fails the run if the new revision isn't serving.
 - **Migrations**: **Actions → migrate → Run workflow** — runs `prisma migrate deploy` as a one-off Fargate task in the VPC (the DB isn't reachable from outside it).
 - **Database changes**: `cd infra && npx cdk deploy DatabaseStack` from a machine with AWS credentials.
