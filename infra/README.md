@@ -222,9 +222,10 @@ Secret:
 
 Merging B2 to `main` ran `.github/workflows/deploy.yml`, which at the time
 did `prisma migrate deploy` (DB still public) → `cdk deploy AppStack` (builds
-the image, creates the ALB + service). Today `deploy.yml` is `cdk deploy
-AppStack` + a smoke test only; migrations moved to `migrate.yml` in
-[B4](#b4--database-private).
+the image, creates the ALB + service). After [B4](#b4--database-private) made
+the DB private, migrations moved to a manual `migrate.yml` run; today
+`deploy.yml` runs them itself, in-VPC, before rolling out AppStack (see
+[Migrations, from here on](#migrations-from-here-on)).
 
 The ACM cert (DNS-validated) covers the apex, `www.`, **and**
 `new.<ZONE_NAME>`. Only `new.<ZONE_NAME>` gets a Route 53 record now — that's

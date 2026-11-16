@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as cdk from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
@@ -13,11 +15,13 @@ const BASE: Omit<MigratorStackProps, "env"> = {
 };
 
 let template: Template;
+let assemblyDir: string;
 
 beforeAll(() => {
   const app = new cdk.App();
   const stack = new MigratorStack(app, "MigratorStack", { env: ENV, ...BASE });
   template = Template.fromStack(stack);
+  assemblyDir = app.synth().directory;
 });
 
 describe("MigratorStack", () => {
@@ -69,9 +73,20 @@ describe("MigratorStack", () => {
     }
   });
 
-  it("builds the migrator from the Dockerfile's migrator target", () => {
-    const json = JSON.stringify(template.toJSON());
-    // The image is a Docker asset; the task points at the bootstrap ECR repo.
-    expect(json).toContain("container-assets");
+  it("builds the migrator from the Dockerfile's migrator target (has the prisma CLI)", () => {
+    // The build target isn't in the template; it's in the asset manifest the
+    // CLI uses to build and publish the image.
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(assemblyDir, "MigratorStack.assets.json"), "utf8"),
+    );
+    const images = Object.values(manifest.dockerImages ?? {}) as {
+      source: { dockerFile?: string; dockerBuildTarget?: string; platform?: string };
+    }[];
+    expect(images).toHaveLength(1);
+    expect(images[0].source).toMatchObject({
+      dockerFile: "Dockerfile",
+      dockerBuildTarget: "migrator",
+      platform: "linux/amd64",
+    });
   });
 });

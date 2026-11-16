@@ -44,15 +44,45 @@ if [ -z "$arn" ] || [ "$arn" = "None" ]; then
   exit 1
 fi
 echo "task: $arn"
+started=$(date +%s)
 
-aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$arn"
+# Migrator log lines since the task started (plus a margin), for failures.
+show_logs() {
+  local mins=$(( ($(date +%s) - started) / 60 + 2 ))
+  aws logs tail "$LOG_GROUP" --since "${mins}m" --format short || true
+}
 
-read -r code reason < <(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$arn" \
-  --query 'tasks[0].containers[0].[exitCode,reason]' --output text)
-echo "exit code: $code  reason: $reason"
+task_field() {
+  aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$arn" \
+    --query "tasks[0].$1" --output text
+}
+
+# Poll instead of `aws ecs wait tasks-stopped`, which gives up after ~10 min
+# (100 x 6s). Long migrations or slow image pulls get MIGRATOR_TIMEOUT_SECONDS
+# (default 30 min).
+timeout=${MIGRATOR_TIMEOUT_SECONDS:-1800}
+while :; do
+  status=$(task_field lastStatus)
+  [ "$status" = "STOPPED" ] && break
+  if (( $(date +%s) - started >= timeout )); then
+    echo "::error::migrator task still $status after ${timeout}s; it was NOT stopped (a migration may be mid-flight). Check it in the ECS console before re-running: $arn"
+    show_logs
+    exit 1
+  fi
+  sleep 10
+done
+
+code=$(task_field 'containers[0].exitCode')
+reason=$(task_field 'containers[0].reason')
+# Set when the container never started (image pull, secrets, capacity) —
+# then there's no exit code and the cause is only here.
+stop_code=$(task_field stopCode)
+stopped_reason=$(task_field stoppedReason)
+echo "exit code: $code  container reason: $reason"
+echo "stop code: $stop_code  stopped reason: $stopped_reason"
 
 if [ "$code" != "0" ]; then
-  echo "::error::migration task failed"
-  aws logs tail "$LOG_GROUP" --since 15m --format short || true
+  echo "::error::migration task failed (exit code: $code; stopped: $stopped_reason)"
+  show_logs
   exit 1
 fi

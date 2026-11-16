@@ -94,11 +94,16 @@ jobs:
           echo "::group::2. Run migrations"
           # The migrator runs in AppStack's cluster/SG. On a brand-new
           # environment AppStack doesn't exist yet: skip, then run migrate.yml
-          # once after this deploy creates it.
-          if aws cloudformation describe-stacks --stack-name AppStack >/dev/null 2>&1; then
+          # once after this deploy creates it. Skip ONLY for that: any other
+          # describe-stacks error (throttling, permissions) fails the deploy,
+          # rather than rolling new code out against an unmigrated schema.
+          if err=$(aws cloudformation describe-stacks --stack-name AppStack 2>&1 >/dev/null); then
             bash ../.github/scripts/run-migrator.sh
-          else
+          elif grep -q "Stack with id AppStack does not exist" <<<"$err"; then
             echo "::warning::AppStack doesn't exist yet; skipping migrations. Run migrate.yml after this deploy."
+          else
+            echo "::error::couldn't check whether AppStack exists: $err"
+            exit 1
           fi
           echo "::endgroup::"
 
